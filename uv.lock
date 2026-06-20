@@ -13,6 +13,7 @@ resolution-markers = [
 [manifest]
 members = [
     "helicoils",
+    "helicoils-label",
     "helicoils-mcp",
     "helicoils-synth",
     "helicoils-train",
@@ -464,6 +465,21 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'infer'", specifier = ">=10" },
 ]
 provides-extras = ["infer"]
+
+[[package]]
+name = "helicoils-label"
+version = "0.1.0"
+source = { editable = "packages/helicoils-label" }
+dependencies = [
+    { name = "helicoils" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "helicoils", editable = "packages/helicoils" },
+    { name = "httpx", specifier = ">=0.27" },
+]
 
 [[package]]
 name = "helicoils-mcp"
