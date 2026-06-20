@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+
+set -e
+set -o nounset
+set -o pipefail
+
+export ENV="${ENV:-dev}"
+
+if [[ -f ".env.${ENV}" ]]; then
+    set -a
+    . ".env.${ENV}"
+    set +a
+fi
+
+if [[ "${TRACE-0}" == "1" ]]; then
+    set -o xtrace
+fi
+
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+}
+
+help_function() {
+    cat <<EOF
+
+Usage: $(basename "$0") [-h] [-u] [-p]
+
+Description:
+  Install, lint, type-check, and test the helicoils Python library (uv workspace).
+
+Options:
+  -h, --help        Display this help message and exit
+  -u, --unit-test   Run unit tests only
+  -p, --publish     Run the full gate, then build and publish to PyPI
+
+With no options, runs the full local gate: install -> lint+format -> types -> unit.
+
+Note:
+  - Requires uv (auto-installed if missing). Uses '.venv' if present.
+  - Publishing needs UV_PUBLISH_TOKEN (or a configured index) in the environment.
+
+EOF
+}
+
+command_exists() {
+    type "$1" &> /dev/null
+}
+
+check_dependencies() {
+    if ! command_exists "uv"; then
+        log "uv not found. Installing..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if [[ -f "$HOME/.local/bin/env" ]]; then
+            . "$HOME/.local/bin/env"
+        elif [[ -f "$HOME/.cargo/env" ]]; then
+            . "$HOME/.cargo/env"
+        fi
+    fi
+    return 0
+}
+
+validate_and_build() {
+    log "Syncing workspace (locked)"
+    if ! uv sync --locked --all-packages; then
+        log "ERROR: uv sync failed (lockfile drift? run 'uv lock')"
+        return 1
+    fi
+
+    log "Linting"
+    if ! uv run ruff check --fix; then
+        log "ERROR: ruff check failed"
+        return 1
+    fi
+
+    log "Formatting"
+    if ! uv run ruff format; then
+        log "ERROR: ruff format failed"
+        return 1
+    fi
+
+    log "Type-checking"
+    if ! uv run ty check; then
+        log "ERROR: ty type check failed"
+        return 1
+    fi
+
+    return 0
+}
+
+test_unit() {
+    log "Running unit tests..."
+    if ! uv run pytest -m unit; then
+        log "ERROR: Unit tests failed"
+        return 1
+    fi
+    return 0
+}
+
+publish() {
+    log "Building distributions"
+    if ! uv build --all-packages; then
+        log "ERROR: build failed"
+        return 1
+    fi
+
+    log "Publishing to PyPI"
+    if ! uv publish; then
+        log "ERROR: publish failed"
+        return 1
+    fi
+    return 0
+}
+
+main() {
+    check_dependencies
+
+    if [[ "$#" -eq 0 ]]; then
+        validate_and_build || { log "Validation failed"; exit 1; }
+        test_unit || { log "Unit tests failed"; exit 1; }
+        log "All checks passed."
+        exit 0
+    fi
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                help_function
+                exit 0
+                ;;
+            -u|--unit-test)
+                test_unit || { log "Unit tests failed"; exit 1; }
+                exit 0
+                ;;
+            -p|--publish)
+                validate_and_build || { log "Validation failed"; exit 1; }
+                test_unit || { log "Unit tests failed"; exit 1; }
+                publish || { log "Publish failed"; exit 1; }
+                exit 0
+                ;;
+            *)
+                echo "Unknown parameter passed: $1"
+                help_function
+                exit 1
+                ;;
+        esac
+    done
+}
+
+main "$@"

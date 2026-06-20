@@ -1,0 +1,33 @@
+[project]
+name = "helicoils-workspace"
+version = "0"
+description = "Workspace root for the helicoils monorepo"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "ty",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["packages/*/src", "packages/*/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["packages"]
+markers = [
+    "unit: fast, isolated unit tests",
+    "integration: tests that touch real external resources",
+]
