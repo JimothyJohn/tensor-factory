@@ -74,15 +74,15 @@ class GroundingDinoAutoLabeler:
         results = self.processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
-            box_threshold=self.box_threshold,
+            threshold=self.box_threshold,
             text_threshold=self.text_threshold,
             target_sizes=[(height, width)],
         )[0]
 
+        # transformers renamed the label key to "text_labels"; tolerate both.
+        labels = results.get("text_labels", results.get("labels", []))
         detections: list[Detection] = []
-        for box, score, label in zip(
-            results["boxes"], results["scores"], results["labels"], strict=False
-        ):
+        for box, score, label in zip(results["boxes"], results["scores"], labels, strict=False):
             x1, y1, x2, y2 = (float(v) for v in box)
             detections.append(
                 Detection(
