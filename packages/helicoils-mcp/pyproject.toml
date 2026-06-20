@@ -1,0 +1,26 @@
+[project]
+name = "helicoils-mcp"
+version = "0.1.0"
+description = "MCP server exposing the helicoils detector as tools (detect, model info, benchmark)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "helicoils[infer]",
+    "mcp>=1.2",
+    "pydantic>=2",
+]
+
+[project.scripts]
+helicoils-mcp = "helicoils_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/helicoils_mcp"]
+artifacts = ["src/helicoils_mcp/models/*.onnx"]
+
+[tool.uv.sources]
+helicoils = { workspace = true }

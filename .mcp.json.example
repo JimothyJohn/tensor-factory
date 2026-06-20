@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy to .mcp.json to register the helicoils detector as an MCP server for this project.",
+  "mcpServers": {
+    "helicoils": {
+      "command": "uv",
+      "args": ["run", "helicoils-mcp"]
+    }
+  }
+}
