@@ -35,8 +35,8 @@ class Generator(Protocol):
 class MockGenerator:
     """Deterministic, torch-free stand-in for the diffusion model.
 
-    Renders a noisy aluminum field with a concentric-ring "coil" filling ~80% of the
-    frame at a seeded position, and returns the exact bounding box it drew. This makes
+    Renders a noisy aluminum field with a concentric-ring "coil" (55-85% of the frame)
+    at a widely-varying seeded position, and returns the exact box it drew. This makes
     the whole downstream pipeline (export, Label Studio, even toy training) runnable and
     testable with no weights, and gives a clean A/B baseline against real generation.
     """
@@ -49,11 +49,12 @@ class MockGenerator:
         img = Image.blend(base, noise, 0.12)
 
         draw = ImageDraw.Draw(img)
-        margin = size * 0.1
-        max_r = size / 2 - margin
-        r = rng.uniform(max_r * 0.85, max_r)
-        cx = rng.uniform(size / 2 - margin / 2, size / 2 + margin / 2)
-        cy = rng.uniform(size / 2 - margin / 2, size / 2 + margin / 2)
+        # Wide positional + scale variance so the model must actually localize, not
+        # memorize a near-centered box. The coil may clip the frame edges (realistic
+        # for an off-center microscope); the ground-truth box is its clamped extent.
+        r = rng.uniform(0.28, 0.42) * size
+        cx = rng.uniform(0.30, 0.70) * size
+        cy = rng.uniform(0.30, 0.70) * size
 
         rings = 9
         line_w = max(2, int(size * 0.012))
