@@ -68,6 +68,9 @@ def export_onnx(
         output_names=["box"],
         opset_version=17,
         dynamic_axes={"image": {0: "batch"}, "box": {0: "batch"}},
+        # Legacy TorchScript exporter: a static tiny CNN needs nothing fancier, and
+        # it avoids the onnxscript dependency the dynamo exporter requires.
+        dynamo=False,
     )
     if quantize:
         from onnxruntime.quantization import QuantType, quantize_dynamic

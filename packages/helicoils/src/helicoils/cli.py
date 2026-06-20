@@ -42,18 +42,19 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="helicoils")
-    parser.add_argument("--size", type=int, default=480, help="model input size (px)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     d = sub.add_parser("detect", help="detect a helicoil in one image")
     d.add_argument("--model", required=True, help="path to the ONNX model")
     d.add_argument("--image", required=True, help="path to the input image")
+    d.add_argument("--size", type=int, default=480, help="model input size (px)")
     d.set_defaults(func=_cmd_detect)
 
     b = sub.add_parser("bench", help="measure CPU throughput (fps)")
     b.add_argument("--model", required=True, help="path to the ONNX model")
     b.add_argument("--image", default=None, help="image to loop on (default: gray)")
     b.add_argument("--n", type=int, default=100, help="iterations")
+    b.add_argument("--size", type=int, default=480, help="model input size (px)")
     b.set_defaults(func=_cmd_bench)
     return parser
 
