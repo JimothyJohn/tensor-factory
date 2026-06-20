@@ -16,6 +16,12 @@ dev = [
     "hypothesis>=6",
     "ruff>=0.6",
     "ty",
+    # Inference runtime + ONNX fixtures so the gate exercises the detector.
+    # torch is intentionally NOT here: training is a heavy offline step, run via
+    # the helicoils-train 'train' extra, not part of CI.
+    "onnxruntime>=1.17",
+    "numpy>=1.24",
+    "onnx>=1.16",
 ]
 
 [tool.ruff]
