@@ -1,8 +1,26 @@
 # helicoils
 
-Python library, distributed as a `uv` workspace (monorepo). One language: Python only.
+Open, lightweight **helicoil detection** — detect coiled-wire threaded inserts in
+machined parts from microscope imagery. Python `uv` workspace (monorepo), one language.
 
-> **TODO:** Replace this line and the package `description` fields with what `helicoils` actually does — the scaffold left them as placeholders.
+The full vision and decisions are in [`PROMPT.md`](PROMPT.md). Shape: synthesize a
+labeled dataset (FLUX.1-schnell generation + GroundingDINO auto-label), train a tiny
+int8 CNN, run it on CPU via onnxruntime, drive it from a CLI. License: Apache-2.0
+throughout (zero AGPL exposure — no Ultralytics).
+
+## Detection contract
+
+A detection is **four `uint8` values** (normalized `xyxy`, one byte each). At 480 px the
+quantization step is ~1.88 px, so round-trip error stays under 1 px — inside the 3 px
+budget — and post-processing stays in 8-bit math. This lives in `helicoils.codec`; the
+canonical box is `helicoils.geometry.BBox` (normalized `xyxy`, top-left origin).
+
+## Compute
+
+Core (`helicoils`) is dependency-free and CPU-only — geometry, codec, formats, inference.
+Generation and training are GPU-heavy and live in sibling packages behind extras; they
+resolve the device **cuda → mps → cpu**, so the dev loop runs on this Mac Studio's MPS and
+scales out to a CUDA box or AWS g5/g6 for bulk runs.
 
 ## Layout
 

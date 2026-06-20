@@ -1,9 +1,10 @@
 [project]
 name = "helicoils"
 version = "0.1.0"
-description = "TODO: one-line description of the helicoils library"
+description = "Open, lightweight helicoil detection: geometry, 8-bit codec, and annotation formats"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
 dependencies = []
 
 [build-system]

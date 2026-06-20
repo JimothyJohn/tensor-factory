@@ -13,6 +13,7 @@ package = false
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "hypothesis>=6",
     "ruff>=0.6",
     "ty",
 ]
