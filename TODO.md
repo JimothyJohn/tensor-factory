@@ -44,16 +44,16 @@ Open work for the helicoils pipeline. Roughly priority-ordered. See
   Trained `helicoil-2class-v1.onnx` (gitignored under `images/`).
 - [x] **Stabilize training.** Added flip augmentation, box/cls loss weighting, and
   best-checkpoint export to `fit` — training no longer exports a random late epoch.
-- [ ] **Make the classes learnable — still blocked on visual separability.** Tried the
-  full ladder: (1) original correct-vs-incorrect = chance (labels = intended state, defects
-  don't render); (2) seated-vs-empty with 284 balanced images + augmentation + best-ckpt =
-  **~79% best / ~60–65% typical, low confidence (~50–78%)**. Root cause (verified by eye,
-  `PREDICTIONS_seated_empty.png`): an **empty *tapped* hole looks like a helicoil** — both
-  are concentric thread-rings in a bore at 480px. The classes genuinely overlap. Real
-  fixes, untried: (a) train at native **1024px** (no downscale) so coil-wire vs cut-thread
-  texture is resolvable — most promising; (b) use a visually-distinct negative (plain
-  *drilled/unthreaded* hole or no-hole) — but that's a different question than QC; (c)
-  accept ~80% as the synthetic-data ceiling.
+- [x] **Make the classes learnable — DONE: helicoil vs missing at 86% val.**
+  `helicoil-vs-missing-v1.onnx` (gitignored under `images/`). Two fixes were needed:
+  (1) **distinct negative** — "missing" = clearly coil-less holes (plain drilled / blind /
+  counterbore), not empty *tapped* holes (which look like a coil); (2) **mean+max class
+  head** — global-average pooling alone washed out the coil-vs-smooth *texture*, capping
+  train acc at 84% on a trivial task; concat mean+max fixed it (train 100%, val 86%).
+  Held-out cross-batch ~69% (subtle/recessed helicoils get called "missing" — they look
+  coil-less). `PREDICTIONS_helicoil_vs_missing.png`.
+- [ ] **Push the classifier higher (optional).** More data + native 1024px (resolve coil
+  texture) for the subtle helicoils; the missing class is already ~90%+ high-confidence.
 
 ## Housekeeping
 
