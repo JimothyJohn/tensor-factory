@@ -220,8 +220,13 @@ def fit(
         line = f"epoch {epoch + 1}/{epochs}  loss {total / len(train_items):.5f}"
         if val_items:
             err, acc = _val_metrics(model, val_items, size, dev, classify=classify)
-            # Higher is better: class accuracy dominates, low center error breaks ties.
-            score = (acc if acc is not None else 0.0) - err / 1000.0
+            # Higher is better. ``err`` is the median center error in *pixels*; normalize by
+            # image size so localization trades against accuracy on a comparable [0,1] scale.
+            # The old ``err / 1000`` made a 15px miss worth 0.015 -- swamped by a single
+            # accuracy step -- so selection shipped the best-classifying epoch with no regard
+            # for box quality. Accuracy still leads (one val step >> a few px), but boxes now
+            # matter ~50x more, and box-only runs (acc is None) still rank by lowest error.
+            score = (acc if acc is not None else 0.0) - err / size
             line += f"  | val err {err:.1f}px" + (f" acc {acc:.0%}" if acc is not None else "")
             if score > best_score:
                 best_score = score
