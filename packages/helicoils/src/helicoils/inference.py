@@ -46,6 +46,9 @@ class Detector:
             providers=list(providers) if providers else ["CPUExecutionProvider"],
         )
         self.input_name = self.session.get_inputs()[0].name
+        self.output_names = [o.name for o in self.session.get_outputs()]
+        # A model trained with a class head also emits a "logits" output.
+        self.has_classes = "logits" in self.output_names
 
     def preprocess(self, image: Image.Image):
         from PIL import Image as PILImage
@@ -58,15 +61,38 @@ class Detector:
         arr = arr.transpose(2, 0, 1)[None, ...]  # 1,C,H,W
         return np.ascontiguousarray(arr)
 
-    def detect_box(self, image: Image.Image) -> BBox:
+    def _run(self, image: Image.Image) -> dict[str, object]:
         x = self.preprocess(image)
-        out = self.session.run(None, {self.input_name: x})[0]
+        outs = self.session.run(None, {self.input_name: x})
+        return dict(zip(self.output_names, outs, strict=True))
+
+    def _box_from(self, out: object) -> BBox:
         coords = self._np.asarray(out).reshape(-1)[:4]
         return BBox.clamped(float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3]))
+
+    def detect_box(self, image: Image.Image) -> BBox:
+        outs = self._run(image)
+        return self._box_from(outs.get("box", next(iter(outs.values()))))
 
     def detect_uint8(self, image: Image.Image) -> tuple[int, int, int, int]:
         """Detection as four ``uint8`` -- the on-the-wire 8-bit contract."""
         return encode_uint8(self.detect_box(image))
+
+    def detect(self, image: Image.Image) -> tuple[BBox, int, float]:
+        """Box plus predicted class id and its softmax score (needs a class-head model).
+
+        Raises if the model has no ``logits`` output -- use :meth:`detect_box` for the
+        box-only models.
+        """
+        if not self.has_classes:
+            raise RuntimeError("model has no class head; use detect_box()")
+        outs = self._run(image)
+        box = self._box_from(outs["box"])
+        logits = self._np.asarray(outs["logits"], dtype=self._np.float64).reshape(-1)
+        exp = self._np.exp(logits - logits.max())
+        probs = exp / exp.sum()
+        cls = int(probs.argmax())
+        return box, cls, float(probs[cls])
 
 
 def benchmark(detector: Detector, image: Image.Image, *, n: int = 100, warmup: int = 5) -> float:

@@ -5,6 +5,6 @@ import torch and are pulled in lazily by the CLI / :mod:`helicoils_train.train`,
 this package imports cleanly without the ``train`` extra installed.
 """
 
-from .data import load_coco_boxes
+from .data import load_coco_boxes, load_coco_labeled
 
-__all__ = ["load_coco_boxes"]
+__all__ = ["load_coco_boxes", "load_coco_labeled"]

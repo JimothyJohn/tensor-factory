@@ -18,6 +18,8 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         size=args.size,
         width=args.width,
         device=args.device,
+        classify=args.classify,
+        val_frac=args.val_frac,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -36,6 +38,12 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--size", type=int, default=480)
     f.add_argument("--width", type=int, default=16, help="model channel width")
     f.add_argument("--device", default=None, help="cuda/mps/cpu (default: auto)")
+    f.add_argument(
+        "--classify",
+        action="store_true",
+        help="train a class head too (categories from the COCO file)",
+    )
+    f.add_argument("--val-frac", type=float, default=0.0, help="held-out fraction for metrics")
     f.set_defaults(func=_cmd_fit)
     return parser
 

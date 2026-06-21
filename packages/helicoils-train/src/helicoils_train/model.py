@@ -7,6 +7,11 @@ spatially soft-maxed and a soft-argmax of the relevant marginal yields that edge
 thus localized sub-pixel by the same mechanism (no size regression, which was the
 precision bottleneck). Output is normalized ``xyxy``; tiny enough to int8-quantize and
 run well above 10 fps.
+
+With ``num_classes > 0`` a global-pooled linear head rides alongside the box head, so the
+same backbone also classifies the detection (e.g. helicoil vs. not-inserted-correctly).
+``forward`` then returns ``(box, logits)``; with ``num_classes == 0`` it returns just the
+box, so existing single-output models and their exports are unchanged.
 """
 
 from __future__ import annotations
@@ -24,9 +29,10 @@ def _block(in_ch: int, out_ch: int) -> nn.Module:
 
 
 class TinyDetector(nn.Module):
-    def __init__(self, width: int = 16) -> None:
+    def __init__(self, width: int = 16, num_classes: int = 0) -> None:
         super().__init__()
         c = width
+        self.num_classes = num_classes
         # 480 -> 240 -> 120 -> 60 -> 30 (4 stride-2 blocks, no final pool).
         self.features = nn.Sequential(
             _block(3, c),
@@ -36,6 +42,8 @@ class TinyDetector(nn.Module):
         )
         # One heatmap per edge: channels are (x1, y1, x2, y2).
         self.heat = nn.Conv2d(4 * c, 4, kernel_size=1)
+        # Optional class head: global-pooled features -> per-class logits.
+        self.classifier = nn.Linear(4 * c, num_classes) if num_classes else None
 
     def forward(self, x):  # noqa: ANN001, ANN201
         f = self.features(x)
@@ -51,4 +59,8 @@ class TinyDetector(nn.Module):
         edge_y = (prob.sum(dim=3) * ys).sum(dim=2)  # B,4 -> y position per channel
 
         # x1 from ch0's x-marginal, y1 from ch1's y, x2 from ch2's x, y2 from ch3's y.
-        return torch.stack([edge_x[:, 0], edge_y[:, 1], edge_x[:, 2], edge_y[:, 3]], dim=1)
+        box = torch.stack([edge_x[:, 0], edge_y[:, 1], edge_x[:, 2], edge_y[:, 3]], dim=1)
+        if self.classifier is not None:
+            logits = self.classifier(f.mean(dim=(2, 3)))  # B,4c -> B,num_classes
+            return box, logits
+        return box
