@@ -63,12 +63,14 @@ echo "== triage =="
 uv run --package tensor-factory-synth tensor-factory-synth triage --data "$DATA_DIR" || true
 echo
 
-# --- 2. image server (serves real_ds/images/* to Label Studio) ---
+# --- 2. image server (serves real_ds/images/* to Label Studio, with CORS) ---
+# CORS matters: LS draws each image onto a crossorigin canvas, which the browser blocks
+# unless the server sends Access-Control-Allow-Origin. Plain http.server doesn't.
 if tmux has-session -t "$IMG_SESSION" 2>/dev/null; then
   echo "image server already running ($IMG_SESSION)"
 else
   "$RUN_BG" "$IMG_SESSION" \
-    python3 -m http.server "$IMG_PORT" --directory "$REPO_ROOT/$DATA_DIR"
+    python3 "$REPO_ROOT/scripts/cors_server.py" "$IMG_PORT" "$REPO_ROOT/$DATA_DIR"
 fi
 
 # --- 3. Label Studio ---
