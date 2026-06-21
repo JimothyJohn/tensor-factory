@@ -37,6 +37,19 @@ Open work for the helicoils pipeline. Roughly priority-ordered. See
 - [ ] **Consider swapping the bundled mcp demo model** from mock to `helicoil-real-v1`
   (left as the mock for now — committed artifact, not touched autonomously).
 
+## 2-class classifier (built; blocked on data)
+
+- [x] **Add a class head to the detector.** Done — `TinyDetector(num_classes=…)` returns
+  `(box, logits)`, `fit(classify=True, val_frac=…)`, `Detector.detect()`, CLI `--classify`.
+  Trained `helicoil-2class-v1.onnx` (gitignored under `images/`).
+- [ ] **Make the classes learnable.** `helicoil-2class-v1` is at **chance (50%)** — it
+  predicts "INCORRECT" for everything. Root cause: labels are the *intended* generation
+  state, but the images mostly don't render the defect (no visual signal). Fixes, pick:
+  (a) reference-conditioned generation so defects actually render; (b) restrict to
+  visually-obvious classes (e.g. present-and-seated vs empty/missing) before subtle ones;
+  (c) relabel by what's actually visible, not intended state. Also: more data (80 train is
+  tiny) and possibly class-weighting.
+
 ## Housekeeping
 
 - [x] **Move the sample-generation script into the repo.** Done — lives at
