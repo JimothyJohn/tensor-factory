@@ -166,6 +166,7 @@ def fit(
     box_weight: float = 1.0,
     cls_weight: float = 1.0,
     augment: bool = False,
+    weight_decay: float = 0.0,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -194,7 +195,7 @@ def fit(
         shuffle=True,
     )
     model = TinyDetector(width, num_classes).to(dev)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     box_loss = nn.SmoothL1Loss()
     cls_loss = nn.CrossEntropyLoss()
 

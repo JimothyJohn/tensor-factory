@@ -42,8 +42,10 @@ class TinyDetector(nn.Module):
         )
         # One heatmap per edge: channels are (x1, y1, x2, y2).
         self.heat = nn.Conv2d(4 * c, 4, kernel_size=1)
-        # Optional class head: global-pooled features -> per-class logits.
-        self.classifier = nn.Linear(4 * c, num_classes) if num_classes else None
+        # Optional class head: concat of global *mean* and *max* pooling -> logits. Mean
+        # alone washes out texture (a coil and a smooth bore have near-identical channel
+        # averages); max captures whether a discriminative texture fires anywhere.
+        self.classifier = nn.Linear(8 * c, num_classes) if num_classes else None
 
     def forward(self, x):  # noqa: ANN001, ANN201
         f = self.features(x)
@@ -61,6 +63,7 @@ class TinyDetector(nn.Module):
         # x1 from ch0's x-marginal, y1 from ch1's y, x2 from ch2's x, y2 from ch3's y.
         box = torch.stack([edge_x[:, 0], edge_y[:, 1], edge_x[:, 2], edge_y[:, 3]], dim=1)
         if self.classifier is not None:
-            logits = self.classifier(f.mean(dim=(2, 3)))  # B,4c -> B,num_classes
+            pooled = torch.cat([f.mean(dim=(2, 3)), f.amax(dim=(2, 3))], dim=1)  # B,8c
+            logits = self.classifier(pooled)
             return box, logits
         return box
