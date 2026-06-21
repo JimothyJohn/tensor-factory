@@ -44,6 +44,45 @@ def test_synth_dataset_requires_features(tmp_path):
         synth_dataset(MockGenerator(), "p", [], n=1, out_dir=tmp_path, size=64)
 
 
+class _FlakyGenerator:
+    """Mock generator that raises on odd seeds -- stands in for Gemini refusals/limits."""
+
+    def __init__(self) -> None:
+        self._mock = MockGenerator()
+
+    def generate(self, prompt, seed, *, size=64):  # noqa: ANN001, ANN201
+        if seed % 2 == 1:
+            raise RuntimeError(f"simulated API failure on seed {seed}")
+        return self._mock.generate(prompt, seed, size=size)
+
+
+@pytest.mark.unit
+def test_skip_errors_keeps_the_batch_alive(tmp_path):
+    seen: list[tuple[int, int]] = []
+    records = synth_dataset(
+        _FlakyGenerator(),
+        "macro helicoil",
+        ["helicoil"],
+        n=4,
+        out_dir=tmp_path,
+        size=64,
+        skip_errors=True,
+        progress=lambda done, total: seen.append((done, total)),
+    )
+    # Seeds 0 and 2 succeed; 1 and 3 are skipped. No orphan images for the failures.
+    assert len(records) == 2
+    assert len(list((tmp_path / "images").glob("*.png"))) == 2
+    assert seen[-1] == (4, 4)  # progress still ticks for skipped images
+    coco = json.loads((tmp_path / "annotations.coco.json").read_text())
+    assert len(coco["images"]) == 2
+
+
+@pytest.mark.unit
+def test_without_skip_errors_a_failure_aborts(tmp_path):
+    with pytest.raises(RuntimeError, match="simulated API failure"):
+        synth_dataset(_FlakyGenerator(), "p", ["helicoil"], n=4, out_dir=tmp_path, size=64)
+
+
 @pytest.mark.unit
 def test_cli_dataset_smoke(tmp_path):
     out = tmp_path / "ds"

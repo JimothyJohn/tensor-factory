@@ -80,6 +80,12 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
 
         labeler = GroundingDinoAutoLabeler()
 
+    step = max(1, args.n // 20)
+
+    def _progress(done: int, total: int) -> None:
+        if done % step == 0 or done == total:
+            print(f"  ... {done}/{total} images", flush=True)
+
     records = synth_dataset(
         gen,
         args.prompt,
@@ -89,9 +95,16 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
         seed_start=args.seed,
         size=args.size,
         labeler=labeler,
+        skip_errors=args.skip_errors,
+        progress=_progress,
     )
     n_dets = sum(len(d) for _, _, _, d in records)
     print(f"wrote {len(records)} images, {n_dets} annotations -> {args.out}")
+    if labeler is not None:
+        print(
+            "auto-labels are review=pending -- validate before training "
+            "(tensor-factory-synth triage --data ...; then tensor-factory-label)"
+        )
     return 0
 
 
@@ -125,6 +138,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-label",
         action="store_true",
         help="skip auto-labeling (gemini backend only)",
+    )
+    d.add_argument(
+        "--skip-errors",
+        action="store_true",
+        help="log and skip per-image failures instead of aborting the batch",
     )
     d.set_defaults(func=_cmd_dataset)
 
