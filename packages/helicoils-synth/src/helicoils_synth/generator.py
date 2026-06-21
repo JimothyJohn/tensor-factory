@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import random
 from dataclasses import dataclass
 from typing import Protocol
@@ -101,12 +102,27 @@ class NanoBananaGenerator:
         self.client = genai.Client(api_key=api_key) if api_key else genai.Client()
         self.model = model
 
-    def generate(self, prompt: str, seed: int, *, size: int = DEFAULT_SIZE) -> GeneratedSample:
+    def generate(
+        self,
+        prompt: str,
+        seed: int,
+        *,
+        size: int = DEFAULT_SIZE,
+        reference: Image.Image | None = None,
+    ) -> GeneratedSample:
         from google.genai import types  # ty: ignore[unresolved-import]
+
+        # A reference photo conditions the model on the real part's appearance (the fix for
+        # subjects it renders wrong from text alone). Image first, then the instruction.
+        contents = [types.Part.from_text(text=prompt)]
+        if reference is not None:
+            buf = io.BytesIO()
+            reference.convert("RGB").save(buf, format="PNG")
+            contents.insert(0, types.Part.from_bytes(data=buf.getvalue(), mime_type="image/png"))
 
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=prompt,
+            contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
                 image_config=types.ImageConfig(aspect_ratio="1:1"),
@@ -127,8 +143,6 @@ def _first_image(response: object) -> Image.Image:
     Raises with the model's text part (often a safety refusal) when no image came back,
     so a blocked prompt fails loudly instead of silently writing nothing.
     """
-    import io
-
     candidates = getattr(response, "candidates", None) or []
     text_parts: list[str] = []
     for cand in candidates:
