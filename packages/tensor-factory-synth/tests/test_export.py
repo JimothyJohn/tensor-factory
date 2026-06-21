@@ -31,6 +31,41 @@ def test_coco_structure_and_bbox_roundtrip():
 
 
 @pytest.mark.unit
+def test_coco_carries_review_and_source_metadata():
+    from tensor_factory import review
+
+    box = BBox(0.1, 0.2, 0.6, 0.8)
+    # An auto-labeler Detection defaults to pending/groundingdino -> untrainable.
+    ai = [("images/a.png", 480, 480, [Detection("helicoil", box, 0.9)])]
+    coco = build_coco(ai, ["helicoil"])
+    assert coco["annotations"][0]["review"] == review.PENDING
+    assert coco["annotations"][0]["source"] == review.GROUNDINGDINO
+    assert coco["images"][0]["review"] == review.PENDING
+
+    # An approved Detection (e.g. mock synthetic GT) rolls the image up to approved.
+    approved = [
+        (
+            "images/b.png",
+            480,
+            480,
+            [Detection("helicoil", box, 1.0, review=review.APPROVED, source=review.SYNTHETIC_GT)],
+        )
+    ]
+    coco2 = build_coco(approved, ["helicoil"])
+    assert coco2["annotations"][0]["review"] == review.APPROVED
+    assert coco2["images"][0]["review"] == review.APPROVED
+
+
+@pytest.mark.unit
+def test_empty_image_is_pending_for_triage():
+    from tensor_factory import review
+
+    coco = build_coco([("images/a.png", 480, 480, [])], ["helicoil"])
+    # No detection could be a missed feature -- it must be reviewed, not silently empty.
+    assert coco["images"][0]["review"] == review.PENDING
+
+
+@pytest.mark.unit
 def test_unknown_label_falls_back_to_first_category():
     records = [("images/a.png", 480, 480, [Detection("mystery", BBox(0, 0, 1, 1), 0.5)])]
     coco = build_coco(records, ["helicoil"])

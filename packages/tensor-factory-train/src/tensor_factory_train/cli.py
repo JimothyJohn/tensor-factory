@@ -23,6 +23,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         box_weight=args.box_weight,
         cls_weight=args.cls_weight,
         augment=args.augment,
+        require_review=not args.allow_unreviewed,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -50,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--box-weight", type=float, default=1.0, help="weight on the box loss")
     f.add_argument("--cls-weight", type=float, default=1.0, help="weight on the class loss")
     f.add_argument("--augment", action="store_true", help="random flip augmentation")
+    f.add_argument(
+        "--allow-unreviewed",
+        action="store_true",
+        help="train on un-validated labels too (default: only human-approved annotations)",
+    )
     f.set_defaults(func=_cmd_fit)
     return parser
 

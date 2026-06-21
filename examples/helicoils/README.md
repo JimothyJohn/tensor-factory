@@ -2,7 +2,7 @@
 
 The first example built on [tensor-factory](../../README.md) — detecting **helicoils**
 (coiled-wire threaded inserts) in machined parts from microscope imagery. It exercises the
-whole pipeline end to end: synthesize → auto-label → train → run on CPU.
+whole pipeline end to end: synthesize → auto-label → **human-validate** → train → run on CPU.
 
 - [`PROMPT.md`](PROMPT.md) — the original challenge brief and design decisions.
 - [`SAMPLES.md`](SAMPLES.md) — the reusable prompt system + 25 QC-inspection samples.
@@ -12,20 +12,38 @@ whole pipeline end to end: synthesize → auto-label → train → run on CPU.
 ## Pipeline (run from the repo root)
 
 ```bash
-# 1. Synthesize + auto-label a dataset (mock backend runs anywhere; gemini/gpu extras for real)
-uv run tensor-factory-synth dataset --prompt "extreme macro of a helicoil in machined aluminum" \
-  --features helicoil --n 200 --out data/
+# 1. Synthesize + auto-label a dataset (mock backend runs anywhere; gemini/gpu extras for real).
+#    GroundingDINO labels are written as review=pending -- AI guesses, not yet trainable.
+uv run tensor-factory-synth --backend gemini dataset \
+  --prompt "extreme macro of a helicoil in machined aluminum" \
+  --features helicoil --n 500 --out data/
 
-# 2. (optional) Correct labels in Label Studio, pull them back to COCO
+# 2. See what needs review.
+uv run tensor-factory-synth triage --data data/
+
+# 3. Human validation: push candidates into Label Studio, correct the boxes/classes, pull
+#    them back. The pull stamps everything review=approved, source=human -- now trainable.
 uv run tensor-factory-label push --data data/ --title "helicoil v1" --image-base http://localhost:8081
+uv run tensor-factory-label pull --project <id> --out data/annotations.coco.json
 
-# 3. Train a tiny int8 detector (needs torch: uv pip install torch)
+# 4. Train a tiny int8 detector. By default ONLY approved annotations train; an all-pending
+#    dataset is refused. (Use --allow-unreviewed to deliberately train on raw AI labels.)
 uv run tensor-factory-train fit --data data/ --out model.onnx --epochs 30 --device mps
 
-# 4. Run it on CPU
+# 5. Run it on CPU
 uv run tensor-factory detect --model model.onnx --image some_frame.png
 uv run tensor-factory bench --model model.onnx
 ```
+
+## The human-validation gate
+
+AI-labeled data is never trainable until a human has validated it. Every COCO annotation
+carries `review` (`pending` / `approved` / `rejected`) and `source` (`groundingdino` /
+`human` / `synthetic_gt`); see [`tensor_factory.review`](../../packages/tensor-factory/src/tensor_factory/review.py).
+GroundingDINO output is `pending`; the Label Studio pull is what flips it to `approved`.
+`tensor-factory-train` loads only `approved` annotations by default, so unreviewed labels
+cannot leak into a model. (Mock synthetic ground truth is exact, not a guess, so it is
+`approved` on creation.)
 
 The bundled demo model in `tensor-factory-mcp` (`helicoil-mock-v1.onnx`) is the artifact
 of this example, so the MCP server works with zero setup.

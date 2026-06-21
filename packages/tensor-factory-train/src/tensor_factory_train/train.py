@@ -8,6 +8,7 @@ produces the uint8-weight model the edge runtime loads.
 from __future__ import annotations
 
 import copy
+import json
 import random
 import statistics
 from pathlib import Path
@@ -17,6 +18,8 @@ import torch  # ty: ignore[unresolved-import]
 from PIL import Image
 from torch import nn  # ty: ignore[unresolved-import]
 from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import]
+
+from tensor_factory.review import review_summary
 
 from .data import load_coco_boxes, load_coco_labeled
 from .model import TinyDetector
@@ -167,6 +170,7 @@ def fit(
     cls_weight: float = 1.0,
     augment: bool = False,
     weight_decay: float = 0.0,
+    require_review: bool = True,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -176,14 +180,34 @@ def fit(
     it). ``augment`` adds flip augmentation. With ``val_frac`` a split is held out and the
     **best-scoring** checkpoint (class acc, then center error) is what gets exported -- not
     whatever the last, possibly-overfit epoch produced.
+
+    With ``require_review`` (default) only human-validated annotations train; an
+    all-pending dataset is refused with guidance to triage it first. ``require_review=False``
+    trains on everything regardless of review state.
     """
     data_dir = Path(data_dir)
     coco = data_dir / "annotations.coco.json"
+
+    summary = review_summary(json.loads(coco.read_text(encoding="utf-8")))
+    a = summary["annotations"]
+    print(
+        f"triage: {a['total']} annotations -- {a['approved']} approved, "
+        f"{a['pending']} pending, {a['rejected']} rejected"
+        + ("" if require_review else "  (review gate OFF: training on all)")
+    )
+
     if classify:
-        items, names = load_coco_labeled(coco, data_dir)
+        items, names = load_coco_labeled(coco, data_dir, require_review=require_review)
     else:
-        items, names = load_coco_boxes(coco, data_dir), []
+        items, names = load_coco_boxes(coco, data_dir, require_review=require_review), []
     if not items:
+        if require_review and a["pending"]:
+            raise ValueError(
+                f"no approved annotations under {data_dir}: {a['pending']} pending human "
+                "review. Validate them via tensor-factory-label (push -> correct -> pull), "
+                "or pass require_review=False / --allow-unreviewed to train on unvalidated "
+                "labels deliberately."
+            )
         raise ValueError(f"no annotations found under {data_dir}")
     num_classes = len(names) if classify else 0
 

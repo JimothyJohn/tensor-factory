@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from tensor_factory import review
 from tensor_factory.formats import from_coco_bbox, to_coco_bbox
 from tensor_factory.geometry import BBox
 
@@ -99,7 +100,9 @@ def ls_export_to_coco(
     """Convert a Label Studio JSON export back to a COCO detection dict.
 
     Tasks with no (uncancelled) rectangle annotations are skipped. Image size is read
-    from each result's ``original_width``/``original_height``.
+    from each result's ``original_width``/``original_height``. Everything that survives the
+    round-trip was looked at by a human, so each annotation and image is stamped
+    ``review=APPROVED``, ``source=HUMAN`` -- this is the step that makes a label trainable.
     """
     images: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
@@ -119,7 +122,15 @@ def ls_export_to_coco(
         width = rects[0]["original_width"]
         height = rects[0]["original_height"]
         file_name = (task.get("data") or {}).get(image_field, "")
-        images.append({"id": image_id, "file_name": file_name, "width": width, "height": height})
+        images.append(
+            {
+                "id": image_id,
+                "file_name": file_name,
+                "width": width,
+                "height": height,
+                "review": review.APPROVED,
+            }
+        )
         for r in rects:
             box = _box_from_value(r["value"])
             label = (r["value"].get("rectanglelabels") or ["helicoil"])[0]
@@ -133,6 +144,8 @@ def ls_export_to_coco(
                     "bbox": [x, y, w, h],
                     "area": w * h,
                     "iscrowd": 0,
+                    "review": review.APPROVED,
+                    "source": review.HUMAN,
                 }
             )
             ann_id += 1

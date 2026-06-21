@@ -15,6 +15,7 @@ from typing import Protocol
 from PIL import Image
 
 from tensor_factory.geometry import BBox
+from tensor_factory.review import GROUNDINGDINO, PENDING
 
 
 @dataclass
@@ -22,6 +23,11 @@ class Detection:
     label: str
     box: BBox
     score: float
+    # Provenance + triage state. Defaults match the primary producer of a Detection --
+    # the GroundingDINO auto-labeler -- so its guesses are PENDING (untrainable) until a
+    # human validates them. The mock ground-truth path overrides these at construction.
+    review: str = PENDING
+    source: str = GROUNDINGDINO
 
 
 class AutoLabeler(Protocol):

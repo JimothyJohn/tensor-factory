@@ -43,6 +43,33 @@ def _cmd_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_triage(args: argparse.Namespace) -> int:
+    import json
+    from pathlib import Path
+
+    from tensor_factory.review import review_summary
+
+    coco = json.loads((Path(args.data) / "annotations.coco.json").read_text())
+    s = review_summary(coco)
+    img, ann = s["images"], s["annotations"]
+    print(f"dataset: {args.data}")
+    print(
+        f"  images       {img['total']:>5}  "
+        f"(approved {img['approved']}, pending {img['pending']}, rejected {img['rejected']})"
+    )
+    print(
+        f"  annotations  {ann['total']:>5}  "
+        f"(approved {ann['approved']}, pending {ann['pending']}, rejected {ann['rejected']})"
+    )
+    print(f"  trainable    {ann['trainable']:>5}  annotations would enter training")
+    if ann["pending"]:
+        print(
+            f"  -> {ann['pending']} annotations awaiting human review "
+            "(tensor-factory-label push -> correct -> pull)"
+        )
+    return 0
+
+
 def _cmd_dataset(args: argparse.Namespace) -> int:
     from .pipeline import synth_dataset
 
@@ -100,6 +127,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip auto-labeling (gemini backend only)",
     )
     d.set_defaults(func=_cmd_dataset)
+
+    t = sub.add_parser("triage", help="report review/validation state of a dataset")
+    t.add_argument("--data", required=True, help="dataset dir (annotations.coco.json)")
+    t.set_defaults(func=_cmd_triage)
     return parser
 
 

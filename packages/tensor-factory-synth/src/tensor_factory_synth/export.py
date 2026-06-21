@@ -11,6 +11,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from tensor_factory import review
 from tensor_factory.formats import to_coco_bbox
 
 from .autolabel import Detection
@@ -26,7 +27,22 @@ def build_coco(records: Sequence[Record], categories: Sequence[str]) -> dict:
     annotations: list[dict] = []
     ann_id = 1
     for image_id, (file_name, width, height, dets) in enumerate(records, start=1):
-        images.append({"id": image_id, "file_name": file_name, "width": width, "height": height})
+        # An image is APPROVED only when it has detections and all are approved; anything
+        # else (auto-labeled, or empty and so possibly a missed feature) needs triage.
+        img_review = (
+            review.APPROVED
+            if dets and all(d.review == review.APPROVED for d in dets)
+            else review.PENDING
+        )
+        images.append(
+            {
+                "id": image_id,
+                "file_name": file_name,
+                "width": width,
+                "height": height,
+                "review": img_review,
+            }
+        )
         for det in dets:
             x, y, w, h = to_coco_bbox(det.box, width=width, height=height)
             annotations.append(
@@ -38,6 +54,8 @@ def build_coco(records: Sequence[Record], categories: Sequence[str]) -> dict:
                     "area": w * h,
                     "iscrowd": 0,
                     "score": det.score,
+                    "review": det.review,
+                    "source": det.source,
                 }
             )
             ann_id += 1

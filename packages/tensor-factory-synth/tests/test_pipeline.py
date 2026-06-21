@@ -29,6 +29,14 @@ def test_synth_dataset_writes_full_bundle(tmp_path):
     assert len(coco["annotations"]) == 3
     assert (tmp_path / "label_studio.json").exists()
 
+    # Mock boxes are exact synthetic GT: approved on creation, so they are trainable
+    # without a human review pass.
+    from tensor_factory import review
+
+    assert all(a["review"] == review.APPROVED for a in coco["annotations"])
+    assert all(a["source"] == review.SYNTHETIC_GT for a in coco["annotations"])
+    assert review.review_summary(coco)["annotations"]["trainable"] == 3
+
 
 @pytest.mark.unit
 def test_synth_dataset_requires_features(tmp_path):

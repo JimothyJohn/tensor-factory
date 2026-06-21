@@ -56,6 +56,12 @@ def test_roundtrip_coco_to_ls_to_coco():
     for a, b in zip(got, coco["annotations"][0]["bbox"], strict=True):
         assert a == pytest.approx(b, abs=0.5)
     assert back["categories"][0]["name"] == "helicoil"
+    # The pull is the human-validation step: everything it returns is trainable.
+    from tensor_factory import review
+
+    assert back["annotations"][0]["review"] == review.APPROVED
+    assert back["annotations"][0]["source"] == review.HUMAN
+    assert back["images"][0]["review"] == review.APPROVED
 
 
 @pytest.mark.unit

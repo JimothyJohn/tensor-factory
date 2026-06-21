@@ -8,7 +8,7 @@ from PIL import Image  # noqa: E402
 
 from tensor_factory.inference import Detector  # noqa: E402
 from tensor_factory_train.model import TinyDetector  # noqa: E402
-from tensor_factory_train.train import _flip_box, export_onnx  # noqa: E402
+from tensor_factory_train.train import _flip_box, export_onnx, fit  # noqa: E402
 
 
 @pytest.mark.unit
@@ -41,6 +41,24 @@ def test_export_int8_onnx_is_loadable(tmp_path):
     assert 0.0 <= box.x1 <= 1.0
     assert box.x1 <= box.x2
     assert not det.has_classes  # box-only model exposes no class head
+
+
+@pytest.mark.unit
+def test_fit_refuses_all_pending_dataset(tmp_path):
+    import json
+
+    # A fresh auto-labeled dataset: every annotation pending human review.
+    coco = {
+        "images": [{"id": 1, "file_name": "images/a.png", "width": 64, "height": 64}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [8, 8, 16, 16], "review": "pending"}
+        ],
+        "categories": [{"id": 1, "name": "helicoil"}],
+    }
+    (tmp_path / "annotations.coco.json").write_text(json.dumps(coco))
+    # The gate refuses to train -- and says why -- before touching any images.
+    with pytest.raises(ValueError, match="pending human review"):
+        fit(tmp_path, tmp_path / "m.onnx", epochs=1, size=64)
 
 
 @pytest.mark.unit

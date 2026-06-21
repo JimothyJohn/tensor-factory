@@ -14,8 +14,20 @@ def test_load_coco_boxes_maps_paths_and_boxes(tmp_path):
             {"id": 2, "file_name": "images/b.png", "width": 200, "height": 100},
         ],
         "annotations": [
-            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [48.0, 96.0, 240.0, 192.0]},
-            {"id": 2, "image_id": 2, "category_id": 1, "bbox": [20.0, 10.0, 100.0, 50.0]},
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [48.0, 96.0, 240.0, 192.0],
+                "review": "approved",
+            },
+            {
+                "id": 2,
+                "image_id": 2,
+                "category_id": 1,
+                "bbox": [20.0, 10.0, 100.0, 50.0],
+                "review": "approved",
+            },
         ],
         "categories": [{"id": 1, "name": "helicoil"}],
     }
@@ -45,8 +57,20 @@ def test_load_coco_labeled_maps_class_ids(tmp_path):
             {"id": 2, "file_name": "images/b.png", "width": 480, "height": 480},
         ],
         "annotations": [
-            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [48.0, 96.0, 240.0, 192.0]},
-            {"id": 2, "image_id": 2, "category_id": 2, "bbox": [0.0, 0.0, 240.0, 240.0]},
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [48.0, 96.0, 240.0, 192.0],
+                "review": "approved",
+            },
+            {
+                "id": 2,
+                "image_id": 2,
+                "category_id": 2,
+                "bbox": [0.0, 0.0, 240.0, 240.0],
+                "review": "approved",
+            },
         ],
         # category ids deliberately not 0-indexed; loader must map them to 0,1 by id order.
         "categories": [{"id": 1, "name": "helicoil"}, {"id": 2, "name": "incorrect"}],
@@ -61,3 +85,52 @@ def test_load_coco_labeled_maps_class_ids(tmp_path):
     assert path == tmp_path / "images/a.png"
     assert box == BBox.from_pixels(48, 96, 288, 288, width=480, height=480)
     assert label == 0
+
+
+def _mixed_review_coco():
+    """Three annotations: approved, pending, and missing-review (untrusted by default)."""
+    return {
+        "images": [
+            {"id": i, "file_name": f"images/{i}.png", "width": 480, "height": 480}
+            for i in (1, 2, 3)
+        ],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [0, 0, 10, 10],
+                "review": "approved",
+            },
+            {"id": 2, "image_id": 2, "category_id": 1, "bbox": [0, 0, 10, 10], "review": "pending"},
+            {"id": 3, "image_id": 3, "category_id": 1, "bbox": [0, 0, 10, 10]},  # no review key
+        ],
+        "categories": [{"id": 1, "name": "helicoil"}],
+    }
+
+
+@pytest.mark.unit
+def test_review_gate_loads_only_approved_by_default(tmp_path):
+    p = tmp_path / "annotations.coco.json"
+    p.write_text(json.dumps(_mixed_review_coco()))
+    # The safety property: pending and unmarked annotations never train by default.
+    items = load_coco_boxes(p, tmp_path)
+    assert len(items) == 1
+    assert items[0][0] == tmp_path / "images/1.png"
+
+
+@pytest.mark.unit
+def test_review_gate_can_be_disabled(tmp_path):
+    p = tmp_path / "annotations.coco.json"
+    p.write_text(json.dumps(_mixed_review_coco()))
+    assert len(load_coco_boxes(p, tmp_path, require_review=False)) == 3
+    items, _ = load_coco_labeled(p, tmp_path, require_review=False)
+    assert len(items) == 3
+
+
+@pytest.mark.unit
+def test_review_gate_applies_to_labeled_loader(tmp_path):
+    p = tmp_path / "annotations.coco.json"
+    p.write_text(json.dumps(_mixed_review_coco()))
+    items, _ = load_coco_labeled(p, tmp_path)
+    assert len(items) == 1

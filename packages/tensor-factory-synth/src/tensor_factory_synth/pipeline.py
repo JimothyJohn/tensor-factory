@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from tensor_factory import review
+
 from .autolabel import AutoLabeler, Detection
 from .export import (
     Record,
@@ -50,9 +52,21 @@ def synth_dataset(
         sample.image.save(out / "images" / file_name)
 
         if labeler is not None:
+            # AI guesses: PENDING + groundingdino provenance (the Detection defaults) --
+            # they must be human-validated before they can train.
             dets = labeler.label(sample.image, features)
         elif sample.box is not None:
-            dets = [Detection(label=features[0], box=sample.box, score=1.0)]
+            # The mock generator's box is exact ground truth, not a guess, so it is
+            # APPROVED on creation -- trainable without a review pass.
+            dets = [
+                Detection(
+                    label=features[0],
+                    box=sample.box,
+                    score=1.0,
+                    review=review.APPROVED,
+                    source=review.SYNTHETIC_GT,
+                )
+            ]
         else:
             dets = []
         records.append((f"images/{file_name}", size, size, dets))
