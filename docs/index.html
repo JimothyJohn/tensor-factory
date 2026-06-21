@@ -3,274 +3,346 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>tensor-factory — synthetic data → tiny int8 detectors</title>
+<title>tensor-factory — synthetic data to tiny int8 detectors</title>
 <meta name="description" content="Open, lightweight tiny-CNN object detection. A factory for turning a prompt into a synthetic dataset, an int8 ONNX model, and a CPU inference harness." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --bg: #0c0e12;
-    --panel: #141821;
-    --panel-2: #1b212d;
-    --line: #262d3b;
-    --ink: #e7ecf3;
-    --muted: #9aa6b8;
-    --accent: #5bd1a6;
-    --accent-2: #6aa6ff;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --paper:    #f7f5ef;
+    --paper-2:  #f1eee5;
+    --ink:      #191712;
+    --ink-2:    #514c41;
+    --muted:    #837d6e;
+    --line:     #e2ddcf;
+    --line-2:   #d4cdba;
+    --accent:   #146a4b;
+    --accent-d: #0d4d36;
+
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --sans:  "Spline Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono:  "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --col: 60rem;
+    --gut: clamp(1.4rem, 5vw, 4rem);
   }
+
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
   body {
     margin: 0;
-    background: radial-gradient(1200px 600px at 70% -10%, #16202c 0%, var(--bg) 55%) no-repeat;
+    overflow-x: hidden;
+    background: var(--paper);
     color: var(--ink);
     font-family: var(--sans);
-    line-height: 1.6;
+    font-size: 17px;
+    line-height: 1.65;
+    letter-spacing: -0.005em;
+    font-feature-settings: "ss01";
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  a { color: var(--accent-2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
 
-  header.hero { padding: 90px 0 56px; }
-  .eyebrow {
+  /* faint paper grain */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  .col { max-width: var(--col); margin-inline: auto; padding-inline: var(--gut); }
+
+  /* ---- top bar ---- */
+  .top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-block: 1.4rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
     font-family: var(--mono);
-    font-size: 13px;
-    letter-spacing: .12em;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    font-weight: 500;
+  }
+  .brand .dot { color: var(--accent); }
+  .nav { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+  .nav a { position: relative; }
+  .nav a::after {
+    content: ""; position: absolute; left: 0; bottom: -3px; height: 1px; width: 100%;
+    background: var(--accent); transform: scaleX(0); transform-origin: left;
+    transition: transform .35s cubic-bezier(.2,.7,.2,1);
+  }
+  .nav a:hover { color: var(--ink); }
+  .nav a:hover::after { transform: scaleX(1); }
+
+  /* ---- hero ---- */
+  .hero { padding-block: clamp(4.5rem, 13vh, 9rem) clamp(3rem, 8vh, 6rem); }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--accent);
+    color: var(--accent-d);
+    margin: 0 0 1.7rem;
   }
   h1 {
-    font-size: clamp(40px, 7vw, 76px);
-    line-height: 1.02;
-    margin: 14px 0 0;
-    letter-spacing: -0.03em;
-    font-weight: 800;
+    font-family: var(--serif);
+    font-weight: 360;
+    font-size: clamp(2.5rem, 8.5vw, 6rem);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    margin: 0;
+    font-optical-sizing: auto;
   }
-  h1 .dim { color: var(--muted); font-weight: 700; }
-  .tagline {
-    font-size: clamp(18px, 2.4vw, 23px);
-    color: var(--muted);
-    max-width: 60ch;
-    margin: 22px 0 0;
+  h1 em {
+    font-style: italic;
+    font-weight: 340;
+    color: var(--accent);
   }
-  .cta { margin-top: 34px; display: flex; gap: 12px; flex-wrap: wrap; }
-  .btn {
-    display: inline-block;
-    padding: 11px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 15px;
-    border: 1px solid var(--line);
+  .lede {
+    margin: 2rem 0 0;
+    max-width: 40ch;
+    font-size: clamp(1.12rem, 2.2vw, 1.35rem);
+    line-height: 1.5;
+    color: var(--ink-2);
+    font-weight: 400;
   }
-  .btn.primary { background: var(--accent); color: #06231a; border-color: transparent; }
-  .btn.primary:hover { text-decoration: none; filter: brightness(1.07); }
-  .btn.ghost { color: var(--ink); background: var(--panel); }
-  .btn.ghost:hover { text-decoration: none; border-color: var(--accent-2); }
+  .actions { margin-top: 2.6rem; display: flex; gap: 1.6rem; align-items: center; flex-wrap: wrap; }
+  .link-arrow {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--line-2);
+    padding-bottom: 2px;
+    transition: border-color .3s, color .3s;
+  }
+  .link-arrow .a { display: inline-block; transition: transform .3s cubic-bezier(.2,.7,.2,1); }
+  .link-arrow:hover { border-color: var(--accent); color: var(--accent); }
+  .link-arrow.primary { color: var(--accent-d); border-color: var(--accent); }
+  .link-arrow.primary:hover .a { transform: translateX(4px); }
+  .link-arrow:hover .a { transform: translateX(4px); }
 
-  section { padding: 30px 0; }
-  h2 {
-    font-size: 14px;
-    letter-spacing: .14em;
+  /* ---- section frame ---- */
+  section { border-top: 1px solid var(--line); }
+  .sec-pad { padding-block: clamp(3rem, 8vh, 5.5rem); }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--muted);
-    font-family: var(--mono);
-    margin: 0 0 22px;
-    font-weight: 600;
+    margin: 0 0 2.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
   }
+  .eyebrow::before { content: ""; width: 1.4rem; height: 1px; background: var(--accent); display: inline-block; }
 
-  /* stats */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-  .stat {
-    background: var(--panel);
+  /* ---- spec row (stats) ---- */
+  .spec {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line);
     border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 20px 18px;
   }
-  .stat .n { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--accent); font-family: var(--mono); }
-  .stat .l { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .spec > div { background: var(--paper); padding: 1.5rem 1.4rem; }
+  .spec .n {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.7rem, 4vw, 2.4rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .spec .n sup { font-size: 0.5em; vertical-align: top; color: var(--accent); }
+  .spec .u { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); margin-top: 0.7rem; line-height: 1.4; }
+  .spec-note { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin: 1rem 0 0; }
 
-  /* pipeline */
-  .pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  /* ---- pipeline ---- */
+  .steps { margin: 0; }
   .step {
-    background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 18px;
-    position: relative;
+    display: grid;
+    grid-template-columns: 3.2rem 1fr;
+    gap: 1.4rem;
+    padding-block: 1.6rem;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
   }
-  .step .k { font-family: var(--mono); color: var(--accent-2); font-size: 13px; }
-  .step h3 { margin: 8px 0 6px; font-size: 17px; }
-  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+  .step:first-child { border-top: none; }
+  .step .num { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); padding-top: 0.35rem; }
+  .step h3 { font-family: var(--serif); font-weight: 420; font-size: 1.5rem; margin: 0 0 0.3rem; letter-spacing: -0.01em; }
+  .step p { margin: 0; color: var(--ink-2); max-width: 52ch; }
 
-  /* code */
+  /* ---- code ---- */
+  .prose { max-width: 54ch; color: var(--ink-2); margin: 0 0 1.8rem; }
   pre {
-    background: #0a0c10;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 18px 20px;
+    margin: 0;
+    background: var(--ink);
+    color: #e9e6dc;
+    border-radius: 4px;
+    padding: 1.4rem 1.5rem;
     overflow-x: auto;
     font-family: var(--mono);
-    font-size: 13.5px;
-    line-height: 1.7;
-    color: #cdd6e4;
+    font-size: 0.86rem;
+    line-height: 1.85;
+    letter-spacing: 0;
   }
-  pre .c { color: #5d6b82; }
-  pre .t { color: var(--accent); }
+  pre .c { color: #8a8270; }
+  pre .k { color: #8fd3b0; }
 
-  /* packages */
-  .pkgs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  /* ---- packages ---- */
   .pkg {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px 18px;
-  }
-  .pkg code { font-family: var(--mono); color: var(--accent); font-size: 14px; font-weight: 600; }
-  .pkg p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
-
-  /* example callout */
-  .example {
-    background: linear-gradient(110deg, #11201c, var(--panel));
-    border: 1px solid #244a3c;
-    border-radius: 14px;
-    padding: 24px 26px;
-    display: flex;
-    gap: 22px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .example .badge {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: #06231a;
-    background: var(--accent);
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-weight: 700;
-  }
-  .example h3 { margin: 10px 0 4px; font-size: 21px; }
-  .example p { margin: 0; color: var(--muted); max-width: 56ch; }
-  .example .body { flex: 1; min-width: 260px; }
-
-  footer {
+    display: grid;
+    grid-template-columns: 14rem 1fr;
+    gap: 1.4rem;
+    padding-block: 1.25rem;
     border-top: 1px solid var(--line);
-    margin-top: 30px;
-    padding: 28px 0 60px;
-    color: var(--muted);
-    font-size: 14px;
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
+    align-items: baseline;
   }
+  .pkg .name { font-family: var(--mono); font-size: 0.92rem; font-weight: 500; }
+  .pkg .name .star { color: var(--accent); }
+  .pkg .desc { color: var(--ink-2); margin: 0; max-width: 50ch; }
 
-  @media (max-width: 720px) {
-    .stats, .pipe, .pkgs { grid-template-columns: 1fr 1fr; }
+  /* ---- example callout ---- */
+  .example {
+    border: 1px solid var(--line-2);
+    border-left: 2px solid var(--accent);
+    border-radius: 4px;
+    padding: 1.8rem 2rem;
+    background: var(--paper-2);
   }
-  @media (max-width: 460px) {
-    .stats, .pipe, .pkgs { grid-template-columns: 1fr; }
+  .example .tag { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-d); }
+  .example h3 { font-family: var(--serif); font-weight: 420; font-size: 1.7rem; margin: 0.6rem 0 0.5rem; letter-spacing: -0.01em; }
+  .example p { margin: 0 0 1.2rem; color: var(--ink-2); max-width: 56ch; }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--line); }
+  .foot {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.6rem;
+    padding-block: 2.2rem 3.4rem;
+    font-family: var(--mono); font-size: 0.76rem; color: var(--muted);
+  }
+  .foot a:hover { color: var(--accent); }
+
+  /* ---- entrance motion ---- */
+  [data-rise] { opacity: 0; transform: translateY(14px); animation: rise .8s cubic-bezier(.2,.7,.2,1) forwards; animation-delay: var(--d, 0s); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (max-width: 700px) {
+    .spec { grid-template-columns: 1fr 1fr; }
+    .pkg { grid-template-columns: 1fr; gap: 0.3rem; }
+    .pkg .desc { max-width: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-rise] { animation: none; opacity: 1; transform: none; }
+    html { scroll-behavior: auto; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header class="hero">
-    <div class="eyebrow">open · CPU-only · Apache-2.0</div>
-    <h1>tensor&#8209;factory<br /><span class="dim">prompt → detector.</span></h1>
-    <p class="tagline">
-      A factory for turning a prompt into a synthetic dataset, a tiny int8 ONNX model, and a
-      CPU inference harness. No GPU at runtime. No AGPL anywhere.
+  <div class="col">
+    <div class="top">
+      <span class="brand">tensor<span class="dot">·</span>factory</span>
+      <nav class="nav"><a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a></nav>
+    </div>
+  </div>
+
+  <header class="hero col">
+    <p class="kicker" data-rise style="--d:.05s">Open · CPU-only · Apache-2.0</p>
+    <h1 data-rise style="--d:.12s">A prompt becomes<br />a tiny <em>detector</em>.</h1>
+    <p class="lede" data-rise style="--d:.22s">
+      tensor-factory turns a text prompt into a synthetic dataset, an int8 ONNX model,
+      and a CPU inference harness. No GPU at runtime. No AGPL anywhere.
     </p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/JimothyJohn/tensor-factory">View on GitHub</a>
-      <a class="btn ghost" href="#pipeline">How it works</a>
+    <div class="actions" data-rise style="--d:.32s">
+      <a class="link-arrow primary" href="https://github.com/JimothyJohn/tensor-factory">View on GitHub <span class="a">→</span></a>
+      <a class="link-arrow" href="#pipeline">How it works <span class="a">→</span></a>
     </div>
   </header>
 
-  <section id="stats">
-    <h2>Reference numbers · helicoils example</h2>
-    <div class="stats">
-      <div class="stat"><div class="n">204</div><div class="l">fps on CPU @ 480px</div></div>
-      <div class="stat"><div class="n">81 KB</div><div class="l">int8 ONNX model</div></div>
-      <div class="stat"><div class="n">~1.9 px</div><div class="l">median localization</div></div>
-      <div class="stat"><div class="n">4&times;u8</div><div class="l">a detection, in 8-bit</div></div>
+  <section id="numbers">
+    <div class="col sec-pad">
+      <p class="eyebrow">Reference numbers · helicoils example</p>
+      <div class="spec">
+        <div><div class="n">204</div><div class="u">fps on CPU<br />@ 480px</div></div>
+        <div><div class="n">81<span style="font-size:.5em"> KB</span></div><div class="u">int8 ONNX<br />model</div></div>
+        <div><div class="n">1.9<span style="font-size:.5em"> px</span></div><div class="u">median<br />localization</div></div>
+        <div><div class="n">4<sup>×u8</sup></div><div class="u">a detection,<br />in 8-bit</div></div>
+      </div>
+      <p class="spec-note">A detection is four uint8 values — normalized xyxy, one byte each.</p>
     </div>
   </section>
 
   <section id="pipeline">
-    <h2>The pipeline</h2>
-    <div class="pipe">
-      <div class="step">
-        <div class="k">01</div><h3>Synthesize</h3>
-        <p>Generate images from a prompt — hosted Gemini (Nano Banana) or a deterministic mock that runs anywhere.</p>
-      </div>
-      <div class="step">
-        <div class="k">02</div><h3>Auto-label</h3>
-        <p>GroundingDINO proposes boxes; refine them in Label Studio and pull clean COCO back out.</p>
-      </div>
-      <div class="step">
-        <div class="k">03</div><h3>Train</h3>
-        <p>A tiny soft-argmax CNN — five stride-2 conv blocks — quantized to an int8 ONNX model.</p>
-      </div>
-      <div class="step">
-        <div class="k">04</div><h3>Run</h3>
-        <p>onnxruntime on CPU, driven from a CLI or exposed over MCP. An edge-sized inference loop.</p>
+    <div class="col sec-pad">
+      <p class="eyebrow">The pipeline</p>
+      <div class="steps">
+        <div class="step"><div class="num">01</div><div><h3>Synthesize</h3><p>Generate images from a prompt — hosted Gemini (Nano Banana) or a deterministic mock that runs anywhere.</p></div></div>
+        <div class="step"><div class="num">02</div><div><h3>Auto-label</h3><p>GroundingDINO proposes boxes; refine them in Label Studio and pull clean COCO back out.</p></div></div>
+        <div class="step"><div class="num">03</div><div><h3>Train</h3><p>A tiny soft-argmax CNN — five stride-2 conv blocks — quantized down to an int8 ONNX model.</p></div></div>
+        <div class="step"><div class="num">04</div><div><h3>Run</h3><p>onnxruntime on CPU, driven from a CLI or exposed over MCP. An edge-sized inference loop.</p></div></div>
       </div>
     </div>
   </section>
 
   <section id="contract">
-    <h2>The detection contract</h2>
-    <p class="tagline" style="margin-bottom:18px">
-      A detection is four <code>uint8</code> values — normalized <code>xyxy</code>, one byte each.
-      At 480&nbsp;px the quantization step is ~1.88&nbsp;px, so round-trip error stays under 1&nbsp;px
-      and all post-processing lives in 8-bit math.
-    </p>
+    <div class="col sec-pad">
+      <p class="eyebrow">The detection contract</p>
+      <p class="prose">
+        Four bytes per detection. At 480&nbsp;px the quantization step is ~1.88&nbsp;px, so
+        round-trip error stays under 1&nbsp;px and all post-processing lives in 8-bit math.
+      </p>
 <pre><span class="c"># run a model on a frame, from the repo root</span>
 uv run tensor-factory detect --model model.onnx --image frame.png
-<span class="c"># → box (norm xyxy) + 4× uint8</span>
 
 <span class="c"># or in Python</span>
-<span class="t">from</span> tensor_factory <span class="t">import</span> BBox, encode_uint8, decode_uint8
-packed = encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))  <span class="c"># (26, 26, 230, 230)</span></pre>
-  </section>
-
-  <section id="example">
-    <h2>Examples</h2>
-    <div class="example">
-      <div class="body">
-        <span class="badge">Example #1</span>
-        <h3>Helicoil detection</h3>
-        <p>
-          Locating coiled-wire threaded inserts in machined parts from low-cost microscope
-          imagery. It's what every package is currently tuned against — and the template for
-          the next object you point the factory at.
-        </p>
-      </div>
-      <a class="btn ghost" href="https://github.com/JimothyJohn/tensor-factory/tree/main/examples/helicoils">examples/helicoils →</a>
+<span class="k">from</span> tensor_factory <span class="k">import</span> BBox, encode_uint8
+encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))   <span class="c"># (26, 26, 230, 230)</span></pre>
     </div>
   </section>
 
   <section id="packages">
-    <h2>Five packages</h2>
-    <div class="pkgs">
-      <div class="pkg"><code>tensor-factory</code><p>Core: BBox geometry, the 4×uint8 codec, annotation formats, ONNX inference + CLI. Dependency-free, CPU-only.</p></div>
-      <div class="pkg"><code>tensor-factory-synth</code><p>Generation (Nano Banana / Gemini) + GroundingDINO auto-label + COCO / Label Studio export.</p></div>
-      <div class="pkg"><code>tensor-factory-train</code><p>The tiny soft-argmax detector → int8 ONNX.</p></div>
-      <div class="pkg"><code>tensor-factory-mcp</code><p>FastMCP server exposing the detector as tools, with a bundled demo model.</p></div>
-      <div class="pkg"><code>tensor-factory-label</code><p>Label Studio integration: push candidates, pull corrected labels.</p></div>
+    <div class="col sec-pad">
+      <p class="eyebrow">Five packages</p>
+      <div class="pkg"><div class="name">tensor-factory</div><p class="desc">Core: BBox geometry, the 4×uint8 codec, annotation formats, ONNX inference + CLI. Dependency-free, CPU-only.</p></div>
+      <div class="pkg"><div class="name">tensor-factory-synth</div><p class="desc">Generation (Nano Banana / Gemini) plus GroundingDINO auto-label and COCO / Label Studio export.</p></div>
+      <div class="pkg"><div class="name">tensor-factory-train</div><p class="desc">The tiny soft-argmax detector, exported to int8 ONNX.</p></div>
+      <div class="pkg"><div class="name">tensor-factory-mcp</div><p class="desc">FastMCP server exposing the detector as tools, with a bundled demo model.</p></div>
+      <div class="pkg"><div class="name">tensor-factory-label</div><p class="desc">Label Studio integration: push candidates, pull corrected labels.</p></div>
+    </div>
+  </section>
+
+  <section id="example">
+    <div class="col sec-pad">
+      <p class="eyebrow">Examples</p>
+      <div class="example">
+        <span class="tag">Example 01</span>
+        <h3>Helicoil detection</h3>
+        <p>
+          Locating coiled-wire threaded inserts in machined parts from low-cost microscope
+          imagery — what every package is currently tuned against, and the template for the
+          next object you point the factory at.
+        </p>
+        <a class="link-arrow" href="https://github.com/JimothyJohn/tensor-factory/tree/main/examples/helicoils">examples/helicoils <span class="a">→</span></a>
+      </div>
     </div>
   </section>
 
   <footer>
-    <span>tensor-factory · Apache-2.0</span>
-    <span><a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory</a></span>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
   </footer>
 
-</div>
 </body>
 </html>
