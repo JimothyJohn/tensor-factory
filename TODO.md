@@ -20,14 +20,22 @@ Open work for the helicoils pipeline. Roughly priority-ordered. See
 
 ## Next — the real dataset + model
 
-- [ ] **Generate a real labeled dataset.** `helicoils-synth --backend gemini dataset ...`
-  (Nano Banana generation + GroundingDINO auto-label) at meaningful N.
-- [ ] **Human-review the labels** in Label Studio, then `helicoils-label pull` → COCO.
-- [ ] **Train on real data.** `helicoils-train fit` on the reviewed COCO set; compare
-  localization vs the current mock-trained demo model.
-- [ ] **Persist datasets + models off `/tmp`.** They're ephemeral (lost on reboot); the
-  only committed model is the 81 KB demo in `helicoils-mcp`. Pick a durable home (S3 or a
-  tracked artifacts dir) before the real training run.
+- [x] **Generate a real labeled dataset.** Done — 142 Nano Banana images + GroundingDINO
+  auto-label (feature `"threaded hole"`, full-frame false-positive filtered) → COCO at
+  `/tmp/real_ds` (`annotations.coco.json` copied to `images/real_ds/`).
+- [x] **Train on real data.** Done — `helicoil-real-v1.onnx` (156 KB int8, width 24, 80
+  epochs, loss 0.0013→0.00035). **Localizes helicoils in held-out photoreal images** where
+  the mock model produced a top-left corner box. Proof: `images/RESULT_before_after.png`.
+- [ ] **Persist the builder + dataset into the repo.** `/tmp/build_ds.py` and the dataset
+  images are still ephemeral. Land the script under `packages/helicoils-synth/scripts/` (or
+  fold its varied-prompt + auto-label flow into the `dataset` CLI) and pick a durable home
+  (S3 / tracked artifacts) for images + model.
+- [ ] **Skipped human review.** Labels were trusted straight from GroundingDINO (no Label
+  Studio pass). For a production model, review them; spot-checks looked tight.
+- [ ] **Add empty-hole negatives.** Training used insert-present states only, so the model
+  will likely fire on any tapped hole (incl. `missing`). Add negatives / a confidence head.
+- [ ] **Consider swapping the bundled mcp demo model** from mock to `helicoil-real-v1`
+  (left as the mock for now — committed artifact, not touched autonomously).
 
 ## Housekeeping
 
