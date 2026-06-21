@@ -1,8 +1,9 @@
 """`helicoils-synth` CLI: sample for prompt iteration, dataset for the real run.
 
 Defaults to the torch-free mock backend so both subcommands run anywhere. Pass
-``--backend flux`` to use FLUX.1-schnell generation + GroundingDINO auto-labeling
-(requires the ``gpu`` extra).
+``--backend gemini`` to use Nano Banana (gemini-2.5-flash-image) generation via the
+Gemini API (needs the ``gemini`` extra + a ``GEMINI_API_KEY``) plus GroundingDINO
+auto-labeling (needs the ``gpu`` extra).
 """
 
 from __future__ import annotations
@@ -18,10 +19,10 @@ def _make_generator(backend: str) -> Generator:
         from .generator import MockGenerator
 
         return MockGenerator()
-    if backend == "flux":
-        from .generator import FluxGenerator
+    if backend == "gemini":
+        from .generator import NanoBananaGenerator
 
-        return FluxGenerator()
+        return NanoBananaGenerator()
     raise ValueError(f"unknown backend: {backend!r}")
 
 
@@ -47,7 +48,7 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
 
     gen = _make_generator(args.backend)
     labeler = None
-    if args.backend == "flux" and not args.no_label:
+    if args.backend == "gemini" and not args.no_label:
         from .autolabel import GroundingDinoAutoLabeler
 
         labeler = GroundingDinoAutoLabeler()
@@ -70,7 +71,7 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="helicoils-synth")
     parser.add_argument(
-        "--backend", choices=("mock", "flux"), default="mock", help="generation backend"
+        "--backend", choices=("mock", "gemini"), default="mock", help="generation backend"
     )
     parser.add_argument("--size", type=int, default=DEFAULT_SIZE, help="image size (px)")
     parser.add_argument("--seed", type=int, default=0, help="starting seed")
@@ -96,7 +97,7 @@ def _build_parser() -> argparse.ArgumentParser:
     d.add_argument(
         "--no-label",
         action="store_true",
-        help="skip auto-labeling (flux backend only)",
+        help="skip auto-labeling (gemini backend only)",
     )
     d.set_defaults(func=_cmd_dataset)
     return parser

@@ -1,7 +1,7 @@
 import pytest
 
 from helicoils.geometry import BBox
-from helicoils_synth.generator import FluxGenerator, GeneratedSample, MockGenerator
+from helicoils_synth.generator import GeneratedSample, MockGenerator, NanoBananaGenerator
 
 
 @pytest.mark.unit
@@ -33,7 +33,11 @@ def test_mock_sample_shape_and_box():
 
 
 @pytest.mark.unit
-def test_flux_requires_gpu_extra():
-    # torch/diffusers are not in the default env, so construction must fail loudly.
-    with pytest.raises(RuntimeError, match="gpu"):
-        FluxGenerator()
+def test_nano_banana_requires_gemini_extra():
+    # google-genai is not in the default (locked) env, so construction must fail loudly.
+    import importlib.util
+
+    if importlib.util.find_spec("google.genai") is not None:
+        pytest.skip("google-genai installed; cannot exercise the missing-extra path")
+    with pytest.raises(RuntimeError, match="gemini"):
+        NanoBananaGenerator()

@@ -1,4 +1,4 @@
-"""Image generators -- the light mock and the heavy FLUX path behind one interface."""
+"""Image generators -- the light mock and the Nano Banana API path behind one interface."""
 
 from __future__ import annotations
 
@@ -72,43 +72,72 @@ class MockGenerator:
         return GeneratedSample(image=img, prompt=prompt, seed=seed, box=box)
 
 
-class FluxGenerator:
-    """FLUX.1-schnell text-to-image (Apache-2.0 weights), behind the ``gpu`` extra.
+class NanoBananaGenerator:
+    """Nano Banana (Gemini ``gemini-2.5-flash-image``) text-to-image via the Gemini API.
 
-    Lazy-imports torch/diffusers in ``__init__`` so the module stays import-light. Not
-    yet runtime-verified -- exercised in the dedicated heavy-run step.
+    No GPU and no local weights -- generation is a hosted API call, so the whole heavy
+    diffusion stack is gone. Needs ``google-genai`` (the ``gemini`` extra) and a
+    ``GEMINI_API_KEY`` (or ``GOOGLE_API_KEY``) in the environment. The model emits 1:1
+    images at a fixed native resolution (1024 px today); we downscale to ``size``, the
+    480 px throughput target. ``seed`` is forwarded best-effort for provenance.
     """
 
     def __init__(
         self,
-        model: str = "black-forest-labs/FLUX.1-schnell",
-        device: str | None = None,
-        steps: int = 4,
+        model: str = "gemini-2.5-flash-image",
+        api_key: str | None = None,
     ) -> None:
         try:
-            import torch  # ty: ignore[unresolved-import]
-            from diffusers import FluxPipeline  # ty: ignore[unresolved-import]
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("FluxGenerator needs the 'gpu' extra: uv sync --extra gpu") from exc
+            # `google` is a namespace package (protobuf et al. occupy it), so an absent
+            # `genai` raises ImportError, not ModuleNotFoundError -- catch both.
+            from google import genai  # ty: ignore[unresolved-import]
+        except ImportError as exc:
+            raise RuntimeError(
+                "NanoBananaGenerator needs the 'gemini' extra: uv sync --extra gemini"
+            ) from exc
 
-        from .device import enable_mps_fallback, resolve_device
-
-        enable_mps_fallback()
-        self._torch = torch
-        self.device = device or resolve_device()
-        self.steps = steps
-        dtype = torch.float32 if self.device == "cpu" else torch.bfloat16
-        self.pipe = FluxPipeline.from_pretrained(model, torch_dtype=dtype).to(self.device)
+        self._genai = genai
+        # Client() reads GEMINI_API_KEY (or GOOGLE_API_KEY) from the environment.
+        self.client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        self.model = model
 
     def generate(self, prompt: str, seed: int, *, size: int = DEFAULT_SIZE) -> GeneratedSample:
-        generator = self._torch.Generator(device="cpu").manual_seed(seed)
-        # schnell is distilled: 0.0 guidance, ~4 steps.
-        out = self.pipe(
-            prompt,
-            num_inference_steps=self.steps,
-            guidance_scale=0.0,
-            height=size,
-            width=size,
-            generator=generator,
+        from google.genai import types  # ty: ignore[unresolved-import]
+
+        resp = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(aspect_ratio="1:1"),
+                seed=seed,
+            ),
         )
-        return GeneratedSample(image=out.images[0], prompt=prompt, seed=seed, box=None)
+        image = _first_image(resp)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        if image.size != (size, size):
+            image = image.resize((size, size), Image.Resampling.LANCZOS)
+        return GeneratedSample(image=image, prompt=prompt, seed=seed, box=None)
+
+
+def _first_image(response: object) -> Image.Image:
+    """Pull the first inline image out of a Gemini ``generate_content`` response.
+
+    Raises with the model's text part (often a safety refusal) when no image came back,
+    so a blocked prompt fails loudly instead of silently writing nothing.
+    """
+    import io
+
+    candidates = getattr(response, "candidates", None) or []
+    text_parts: list[str] = []
+    for cand in candidates:
+        content = getattr(cand, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            blob = getattr(part, "inline_data", None)
+            if blob is not None and blob.data:
+                return Image.open(io.BytesIO(blob.data))
+            if getattr(part, "text", None):
+                text_parts.append(part.text)
+    detail = f": {' '.join(text_parts)}" if text_parts else ""
+    raise RuntimeError(f"Gemini returned no image{detail}")

@@ -1,7 +1,7 @@
 [project]
 name = "helicoils-synth"
 version = "0.1.0"
-description = "Synthetic helicoil image generation (FLUX.1-schnell) and auto-labeling (GroundingDINO)"
+description = "Synthetic helicoil image generation (Nano Banana / Gemini) and auto-labeling (GroundingDINO)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -11,15 +11,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Heavy, GPU-shaped deps. NOT installed by default `uv sync`; pull with
-# `uv sync --extra gpu` on a CUDA box or this Mac Studio's MPS backend.
+# Generation backend: hosted Gemini API (Nano Banana). Light, no GPU. Pull with
+# `uv sync --extra gemini`; needs a GEMINI_API_KEY in the environment.
+gemini = [
+    "google-genai>=1",
+]
+# Auto-labeler (GroundingDINO) only. Heavy, GPU-shaped; NOT installed by default
+# `uv sync`. Pull with `uv sync --extra gpu` on a CUDA box or this Mac Studio's MPS.
 gpu = [
     "torch>=2.2",
-    "diffusers>=0.30",
     "transformers>=4.44",
     "accelerate>=0.30",
-    "sentencepiece>=0.2",
-    "protobuf>=4",
 ]
 
 [project.scripts]
