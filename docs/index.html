@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tensor-factory — synthetic data → tiny int8 detectors</title>
+<meta name="description" content="Open, lightweight tiny-CNN object detection. A factory for turning a prompt into a synthetic dataset, an int8 ONNX model, and a CPU inference harness." />
+<style>
+  :root {
+    --bg: #0c0e12;
+    --panel: #141821;
+    --panel-2: #1b212d;
+    --line: #262d3b;
+    --ink: #e7ecf3;
+    --muted: #9aa6b8;
+    --accent: #5bd1a6;
+    --accent-2: #6aa6ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 70% -10%, #16202c 0%, var(--bg) 55%) no-repeat;
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero { padding: 90px 0 56px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-size: clamp(40px, 7vw, 76px);
+    line-height: 1.02;
+    margin: 14px 0 0;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+  }
+  h1 .dim { color: var(--muted); font-weight: 700; }
+  .tagline {
+    font-size: clamp(18px, 2.4vw, 23px);
+    color: var(--muted);
+    max-width: 60ch;
+    margin: 22px 0 0;
+  }
+  .cta { margin-top: 34px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 11px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 15px;
+    border: 1px solid var(--line);
+  }
+  .btn.primary { background: var(--accent); color: #06231a; border-color: transparent; }
+  .btn.primary:hover { text-decoration: none; filter: brightness(1.07); }
+  .btn.ghost { color: var(--ink); background: var(--panel); }
+  .btn.ghost:hover { text-decoration: none; border-color: var(--accent-2); }
+
+  section { padding: 30px 0; }
+  h2 {
+    font-size: 14px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin: 0 0 22px;
+    font-weight: 600;
+  }
+
+  /* stats */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 18px;
+  }
+  .stat .n { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--accent); font-family: var(--mono); }
+  .stat .l { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  /* pipeline */
+  .pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .step {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+  }
+  .step .k { font-family: var(--mono); color: var(--accent-2); font-size: 13px; }
+  .step h3 { margin: 8px 0 6px; font-size: 17px; }
+  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* code */
+  pre {
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: #cdd6e4;
+  }
+  pre .c { color: #5d6b82; }
+  pre .t { color: var(--accent); }
+
+  /* packages */
+  .pkgs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pkg {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .pkg code { font-family: var(--mono); color: var(--accent); font-size: 14px; font-weight: 600; }
+  .pkg p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+
+  /* example callout */
+  .example {
+    background: linear-gradient(110deg, #11201c, var(--panel));
+    border: 1px solid #244a3c;
+    border-radius: 14px;
+    padding: 24px 26px;
+    display: flex;
+    gap: 22px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .example .badge {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: #06231a;
+    background: var(--accent);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .example h3 { margin: 10px 0 4px; font-size: 21px; }
+  .example p { margin: 0; color: var(--muted); max-width: 56ch; }
+  .example .body { flex: 1; min-width: 260px; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    margin-top: 30px;
+    padding: 28px 0 60px;
+    color: var(--muted);
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  @media (max-width: 720px) {
+    .stats, .pipe, .pkgs { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 460px) {
+    .stats, .pipe, .pkgs { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">open · CPU-only · Apache-2.0</div>
+    <h1>tensor&#8209;factory<br /><span class="dim">prompt → detector.</span></h1>
+    <p class="tagline">
+      A factory for turning a prompt into a synthetic dataset, a tiny int8 ONNX model, and a
+      CPU inference harness. No GPU at runtime. No AGPL anywhere.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/JimothyJohn/tensor-factory">View on GitHub</a>
+      <a class="btn ghost" href="#pipeline">How it works</a>
+    </div>
+  </header>
+
+  <section id="stats">
+    <h2>Reference numbers · helicoils example</h2>
+    <div class="stats">
+      <div class="stat"><div class="n">204</div><div class="l">fps on CPU @ 480px</div></div>
+      <div class="stat"><div class="n">81 KB</div><div class="l">int8 ONNX model</div></div>
+      <div class="stat"><div class="n">~1.9 px</div><div class="l">median localization</div></div>
+      <div class="stat"><div class="n">4&times;u8</div><div class="l">a detection, in 8-bit</div></div>
+    </div>
+  </section>
+
+  <section id="pipeline">
+    <h2>The pipeline</h2>
+    <div class="pipe">
+      <div class="step">
+        <div class="k">01</div><h3>Synthesize</h3>
+        <p>Generate images from a prompt — hosted Gemini (Nano Banana) or a deterministic mock that runs anywhere.</p>
+      </div>
+      <div class="step">
+        <div class="k">02</div><h3>Auto-label</h3>
+        <p>GroundingDINO proposes boxes; refine them in Label Studio and pull clean COCO back out.</p>
+      </div>
+      <div class="step">
+        <div class="k">03</div><h3>Train</h3>
+        <p>A tiny soft-argmax CNN — five stride-2 conv blocks — quantized to an int8 ONNX model.</p>
+      </div>
+      <div class="step">
+        <div class="k">04</div><h3>Run</h3>
+        <p>onnxruntime on CPU, driven from a CLI or exposed over MCP. An edge-sized inference loop.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="contract">
+    <h2>The detection contract</h2>
+    <p class="tagline" style="margin-bottom:18px">
+      A detection is four <code>uint8</code> values — normalized <code>xyxy</code>, one byte each.
+      At 480&nbsp;px the quantization step is ~1.88&nbsp;px, so round-trip error stays under 1&nbsp;px
+      and all post-processing lives in 8-bit math.
+    </p>
+<pre><span class="c"># run a model on a frame, from the repo root</span>
+uv run tensor-factory detect --model model.onnx --image frame.png
+<span class="c"># → box (norm xyxy) + 4× uint8</span>
+
+<span class="c"># or in Python</span>
+<span class="t">from</span> tensor_factory <span class="t">import</span> BBox, encode_uint8, decode_uint8
+packed = encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))  <span class="c"># (26, 26, 230, 230)</span></pre>
+  </section>
+
+  <section id="example">
+    <h2>Examples</h2>
+    <div class="example">
+      <div class="body">
+        <span class="badge">Example #1</span>
+        <h3>Helicoil detection</h3>
+        <p>
+          Locating coiled-wire threaded inserts in machined parts from low-cost microscope
+          imagery. It's what every package is currently tuned against — and the template for
+          the next object you point the factory at.
+        </p>
+      </div>
+      <a class="btn ghost" href="https://github.com/JimothyJohn/tensor-factory/tree/main/examples/helicoils">examples/helicoils →</a>
+    </div>
+  </section>
+
+  <section id="packages">
+    <h2>Five packages</h2>
+    <div class="pkgs">
+      <div class="pkg"><code>tensor-factory</code><p>Core: BBox geometry, the 4×uint8 codec, annotation formats, ONNX inference + CLI. Dependency-free, CPU-only.</p></div>
+      <div class="pkg"><code>tensor-factory-synth</code><p>Generation (Nano Banana / Gemini) + GroundingDINO auto-label + COCO / Label Studio export.</p></div>
+      <div class="pkg"><code>tensor-factory-train</code><p>The tiny soft-argmax detector → int8 ONNX.</p></div>
+      <div class="pkg"><code>tensor-factory-mcp</code><p>FastMCP server exposing the detector as tools, with a bundled demo model.</p></div>
+      <div class="pkg"><code>tensor-factory-label</code><p>Label Studio integration: push candidates, pull corrected labels.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>tensor-factory · Apache-2.0</span>
+    <span><a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory</a></span>
+  </footer>
+
+</div>
+</body>
+</html>

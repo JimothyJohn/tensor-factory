@@ -1,0 +1,24 @@
+[project]
+name = "tensor-factory-label"
+version = "0.1.0"
+description = "Label Studio integration: push auto-label candidates, pull corrected labels back to COCO"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "tensor-factory",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+tensor-factory-label = "tensor_factory_label.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tensor_factory_label"]
+
+[tool.uv.sources]
+tensor-factory = { workspace = true }

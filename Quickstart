@@ -26,7 +26,7 @@ help_function() {
 Usage: $(basename "$0") [-h] [-u] [-p]
 
 Description:
-  Install, lint, type-check, and test the helicoils Python library (uv workspace).
+  Install, lint, type-check, and test the tensor-factory Python library (uv workspace).
 
 Options:
   -h, --help        Display this help message and exit

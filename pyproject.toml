@@ -1,7 +1,7 @@
 [project]
-name = "helicoils-workspace"
+name = "tensor-factory-workspace"
 version = "0"
-description = "Workspace root for the helicoils monorepo"
+description = "Workspace root for the tensor-factory monorepo"
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
@@ -18,7 +18,7 @@ dev = [
     "ty",
     # Inference runtime + ONNX fixtures so the gate exercises the detector.
     # torch is intentionally NOT here: training is a heavy offline step, run via
-    # the helicoils-train 'train' extra, not part of CI.
+    # the tensor-factory-train 'train' extra, not part of CI.
     "onnxruntime>=1.17",
     "numpy>=1.24",
     "onnx>=1.16",

@@ -1,0 +1,26 @@
+[project]
+name = "tensor-factory-mcp"
+version = "0.1.0"
+description = "MCP server exposing a tensor-factory detector as tools (detect, model info, benchmark)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "tensor-factory[infer]",
+    "mcp>=1.2",
+    "pydantic>=2",
+]
+
+[project.scripts]
+tensor-factory-mcp = "tensor_factory_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tensor_factory_mcp"]
+artifacts = ["src/tensor_factory_mcp/models/*.onnx"]
+
+[tool.uv.sources]
+tensor-factory = { workspace = true }

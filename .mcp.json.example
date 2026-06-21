@@ -1,9 +1,9 @@
 {
-  "_comment": "Copy to .mcp.json to register the helicoils detector as an MCP server for this project.",
+  "_comment": "Copy to .mcp.json to register the tensor-factory detector as an MCP server for this project.",
   "mcpServers": {
-    "helicoils": {
+    "tensor-factory": {
       "command": "uv",
-      "args": ["run", "helicoils-mcp"]
+      "args": ["run", "tensor-factory-mcp"]
     }
   }
 }

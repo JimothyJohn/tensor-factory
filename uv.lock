@@ -12,12 +12,12 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "helicoils",
-    "helicoils-label",
-    "helicoils-mcp",
-    "helicoils-synth",
-    "helicoils-train",
-    "helicoils-workspace",
+    "tensor-factory",
+    "tensor-factory-label",
+    "tensor-factory-mcp",
+    "tensor-factory-synth",
+    "tensor-factory-train",
+    "tensor-factory-workspace",
 ]
 
 [[package]]
@@ -472,143 +472,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
-]
-
-[[package]]
-name = "helicoils"
-version = "0.1.0"
-source = { editable = "packages/helicoils" }
-
-[package.optional-dependencies]
-infer = [
-    { name = "numpy" },
-    { name = "onnxruntime" },
-    { name = "pillow" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", marker = "extra == 'infer'", specifier = ">=1.24" },
-    { name = "onnxruntime", marker = "extra == 'infer'", specifier = ">=1.17" },
-    { name = "pillow", marker = "extra == 'infer'", specifier = ">=10" },
-]
-provides-extras = ["infer"]
-
-[[package]]
-name = "helicoils-label"
-version = "0.1.0"
-source = { editable = "packages/helicoils-label" }
-dependencies = [
-    { name = "helicoils" },
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "helicoils", editable = "packages/helicoils" },
-    { name = "httpx", specifier = ">=0.27" },
-]
-
-[[package]]
-name = "helicoils-mcp"
-version = "0.1.0"
-source = { editable = "packages/helicoils-mcp" }
-dependencies = [
-    { name = "helicoils", extra = ["infer"] },
-    { name = "mcp" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "helicoils", extras = ["infer"], editable = "packages/helicoils" },
-    { name = "mcp", specifier = ">=1.2" },
-    { name = "pydantic", specifier = ">=2" },
-]
-
-[[package]]
-name = "helicoils-synth"
-version = "0.1.0"
-source = { editable = "packages/helicoils-synth" }
-dependencies = [
-    { name = "helicoils" },
-    { name = "pillow" },
-]
-
-[package.optional-dependencies]
-gemini = [
-    { name = "google-genai" },
-]
-gpu = [
-    { name = "accelerate" },
-    { name = "torch" },
-    { name = "transformers" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", marker = "extra == 'gpu'", specifier = ">=0.30" },
-    { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1" },
-    { name = "helicoils", editable = "packages/helicoils" },
-    { name = "pillow", specifier = ">=10" },
-    { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.2" },
-    { name = "transformers", marker = "extra == 'gpu'", specifier = ">=4.44" },
-]
-provides-extras = ["gemini", "gpu"]
-
-[[package]]
-name = "helicoils-train"
-version = "0.1.0"
-source = { editable = "packages/helicoils-train" }
-dependencies = [
-    { name = "helicoils" },
-    { name = "numpy" },
-    { name = "onnxruntime" },
-    { name = "pillow" },
-]
-
-[package.optional-dependencies]
-train = [
-    { name = "torch" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "helicoils", editable = "packages/helicoils" },
-    { name = "numpy", specifier = ">=1.24" },
-    { name = "onnxruntime", specifier = ">=1.17" },
-    { name = "pillow", specifier = ">=10" },
-    { name = "torch", marker = "extra == 'train'", specifier = ">=2.2" },
-]
-provides-extras = ["train"]
-
-[[package]]
-name = "helicoils-workspace"
-version = "0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6" },
-    { name = "numpy", specifier = ">=1.24" },
-    { name = "onnx", specifier = ">=1.16" },
-    { name = "onnxruntime", specifier = ">=1.17" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "ty" },
 ]
 
 [[package]]
@@ -2105,6 +1968,143 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
+]
+
+[[package]]
+name = "tensor-factory"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory" }
+
+[package.optional-dependencies]
+infer = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "pillow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", marker = "extra == 'infer'", specifier = ">=1.24" },
+    { name = "onnxruntime", marker = "extra == 'infer'", specifier = ">=1.17" },
+    { name = "pillow", marker = "extra == 'infer'", specifier = ">=10" },
+]
+provides-extras = ["infer"]
+
+[[package]]
+name = "tensor-factory-label"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory-label" }
+dependencies = [
+    { name = "httpx" },
+    { name = "tensor-factory" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "tensor-factory", editable = "packages/tensor-factory" },
+]
+
+[[package]]
+name = "tensor-factory-mcp"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory-mcp" }
+dependencies = [
+    { name = "mcp" },
+    { name = "pydantic" },
+    { name = "tensor-factory", extra = ["infer"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.2" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "tensor-factory", extras = ["infer"], editable = "packages/tensor-factory" },
+]
+
+[[package]]
+name = "tensor-factory-synth"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory-synth" }
+dependencies = [
+    { name = "pillow" },
+    { name = "tensor-factory" },
+]
+
+[package.optional-dependencies]
+gemini = [
+    { name = "google-genai" },
+]
+gpu = [
+    { name = "accelerate" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", marker = "extra == 'gpu'", specifier = ">=0.30" },
+    { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1" },
+    { name = "pillow", specifier = ">=10" },
+    { name = "tensor-factory", editable = "packages/tensor-factory" },
+    { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.2" },
+    { name = "transformers", marker = "extra == 'gpu'", specifier = ">=4.44" },
+]
+provides-extras = ["gemini", "gpu"]
+
+[[package]]
+name = "tensor-factory-train"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory-train" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "pillow" },
+    { name = "tensor-factory" },
+]
+
+[package.optional-dependencies]
+train = [
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "onnxruntime", specifier = ">=1.17" },
+    { name = "pillow", specifier = ">=10" },
+    { name = "tensor-factory", editable = "packages/tensor-factory" },
+    { name = "torch", marker = "extra == 'train'", specifier = ">=2.2" },
+]
+provides-extras = ["train"]
+
+[[package]]
+name = "tensor-factory-workspace"
+version = "0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6" },
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "onnx", specifier = ">=1.16" },
+    { name = "onnxruntime", specifier = ">=1.17" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "ty" },
 ]
 
 [[package]]

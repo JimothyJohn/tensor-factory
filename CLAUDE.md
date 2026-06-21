@@ -1,9 +1,12 @@
-# helicoils
+# tensor-factory
 
-Open, lightweight **helicoil detection** — detect coiled-wire threaded inserts in
-machined parts from microscope imagery. Python `uv` workspace (monorepo), one language.
+Open, lightweight **tiny-CNN object detection** — a factory for synthetic-data → int8
+detectors that run on CPU. **Helicoil detection** (coiled-wire threaded inserts in
+machined parts, from microscope imagery) is the first example, under
+[`examples/helicoils`](examples/helicoils). Python `uv` workspace (monorepo), one language.
 
-The full vision and decisions are in [`PROMPT.md`](PROMPT.md). Shape: synthesize a
+The full vision and decisions for the first example are in
+[`examples/helicoils/PROMPT.md`](examples/helicoils/PROMPT.md). Shape: synthesize a
 labeled dataset (Nano Banana / Gemini generation + GroundingDINO auto-label), train a
 tiny int8 CNN, run it on CPU via onnxruntime, drive it from a CLI. License: Apache-2.0
 throughout (zero AGPL exposure — no Ultralytics).
@@ -12,13 +15,14 @@ throughout (zero AGPL exposure — no Ultralytics).
 
 Five-package workspace, end-to-end pipeline working on synthetic data: **204 fps CPU
 @480px, 81 KB int8 model, ~1.9 px median localization**. The only committed model is the
-demo bundled in `helicoils-mcp`, trained on the **mock** generator — not photoreal yet.
+demo bundled in `tensor-factory-mcp`, trained on the **mock** generator — not photoreal yet.
 
 - **Generation migrated FLUX.1-schnell → Nano Banana** (Gemini `gemini-2.5-flash-image`)
   on branch `nano-banana-generation` — a hosted API call, no local GPU. Reads
   `GEMINI_API_KEY` from the env. Not yet merged to `main`.
-- The reusable prompt system + 25 QC-inspection samples live in [`SAMPLES.md`](SAMPLES.md)
-  and `images/` (`images/manifest.json` maps each to its prompt + seed + QC state).
+- The reusable prompt system + 25 QC-inspection samples live in
+  [`examples/helicoils/SAMPLES.md`](examples/helicoils/SAMPLES.md) and
+  `examples/helicoils/images/` (`manifest.json` maps each to its prompt + seed + QC state).
 - Open work is tracked in [`TODO.md`](TODO.md). The next real milestone: train the
   detector on a Nano-Banana-generated, GroundingDINO-labeled dataset.
 
@@ -26,16 +30,17 @@ demo bundled in `helicoils-mcp`, trained on the **mock** generator — not photo
 
 A detection is **four `uint8` values** (normalized `xyxy`, one byte each). At 480 px the
 quantization step is ~1.88 px, so round-trip error stays under 1 px — inside the 3 px
-budget — and post-processing stays in 8-bit math. This lives in `helicoils.codec`; the
-canonical box is `helicoils.geometry.BBox` (normalized `xyxy`, top-left origin).
+budget — and post-processing stays in 8-bit math. This lives in `tensor_factory.codec`; the
+canonical box is `tensor_factory.geometry.BBox` (normalized `xyxy`, top-left origin).
 
 ## Compute
 
-Core (`helicoils`) is dependency-free and CPU-only — geometry, codec, formats, inference.
-Image **generation** is now a hosted Gemini API call (no GPU) behind `helicoils-synth`'s
-`gemini` extra. **Auto-labeling** (GroundingDINO) and **training** are GPU-heavy, live in
-sibling packages behind extras, and resolve the device **cuda → mps → cpu** — so the dev
-loop runs on this Mac Studio's MPS and scales out to a CUDA box or AWS g5/g6 for bulk runs.
+Core (`tensor-factory`) is dependency-free and CPU-only — geometry, codec, formats,
+inference. Image **generation** is now a hosted Gemini API call (no GPU) behind
+`tensor-factory-synth`'s `gemini` extra. **Auto-labeling** (GroundingDINO) and **training**
+are GPU-heavy, live in sibling packages behind extras, and resolve the device
+**cuda → mps → cpu** — so the dev loop runs on this Mac Studio's MPS and scales out to a
+CUDA box or AWS g5/g6 for bulk runs.
 
 ## Layout
 
@@ -43,12 +48,15 @@ loop runs on this Mac Studio's MPS and scales out to a CUDA box or AWS g5/g6 for
 pyproject.toml              # workspace root: members, dev deps, ruff + pytest config
 uv.lock                     # single lockfile for the whole workspace
 Quickstart                  # install -> lint+format -> types -> unit (and -p to publish)
+docs/index.html             # tensor-factory landing page (helicoils as example #1)
 packages/
-  helicoils/                # core library: BBox geometry, 4xuint8 codec, formats, onnxruntime inference + CLI
-  helicoils-synth/          # generation (Nano Banana/Gemini) + GroundingDINO auto-label + COCO/Label Studio export
-  helicoils-train/          # tiny soft-argmax detector -> int8 ONNX
-  helicoils-mcp/            # FastMCP server exposing the detector (bundled demo model)
-  helicoils-label/          # Label Studio push/pull
+  tensor-factory/           # core library: BBox geometry, 4xuint8 codec, formats, onnxruntime inference + CLI
+  tensor-factory-synth/     # generation (Nano Banana/Gemini) + GroundingDINO auto-label + COCO/Label Studio export
+  tensor-factory-train/     # tiny soft-argmax detector -> int8 ONNX
+  tensor-factory-mcp/       # FastMCP server exposing the detector (bundled demo model)
+  tensor-factory-label/     # Label Studio push/pull
+examples/
+  helicoils/                # first example: PROMPT.md brief, SAMPLES.md, generated images/
 ```
 
 Each package uses src layout, ships `py.typed`, and carries pytest markers
