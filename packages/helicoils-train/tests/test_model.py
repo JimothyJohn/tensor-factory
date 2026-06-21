@@ -8,7 +8,17 @@ from PIL import Image  # noqa: E402
 
 from helicoils.inference import Detector  # noqa: E402
 from helicoils_train.model import TinyDetector  # noqa: E402
-from helicoils_train.train import export_onnx  # noqa: E402
+from helicoils_train.train import _flip_box, export_onnx  # noqa: E402
+
+
+@pytest.mark.unit
+def test_flip_box_is_a_mirror_involution():
+    box = (0.1, 0.2, 0.6, 0.9)  # asymmetric so reflections are observable
+    assert _flip_box(box, horizontal=True) == pytest.approx((0.4, 0.2, 0.9, 0.9))
+    assert _flip_box(box, horizontal=False) == pytest.approx((0.1, 0.1, 0.6, 0.8))
+    # flipping twice on the same axis restores the original
+    once = _flip_box(box, horizontal=True)
+    assert _flip_box(once, horizontal=True) == pytest.approx(box)
 
 
 @pytest.mark.unit

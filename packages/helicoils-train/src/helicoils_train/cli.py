@@ -20,6 +20,9 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         device=args.device,
         classify=args.classify,
         val_frac=args.val_frac,
+        box_weight=args.box_weight,
+        cls_weight=args.cls_weight,
+        augment=args.augment,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -44,6 +47,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="train a class head too (categories from the COCO file)",
     )
     f.add_argument("--val-frac", type=float, default=0.0, help="held-out fraction for metrics")
+    f.add_argument("--box-weight", type=float, default=1.0, help="weight on the box loss")
+    f.add_argument("--cls-weight", type=float, default=1.0, help="weight on the class loss")
+    f.add_argument("--augment", action="store_true", help="random flip augmentation")
     f.set_defaults(func=_cmd_fit)
     return parser
 
