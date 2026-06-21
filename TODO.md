@@ -42,13 +42,18 @@ Open work for the helicoils pipeline. Roughly priority-ordered. See
 - [x] **Add a class head to the detector.** Done — `TinyDetector(num_classes=…)` returns
   `(box, logits)`, `fit(classify=True, val_frac=…)`, `Detector.detect()`, CLI `--classify`.
   Trained `helicoil-2class-v1.onnx` (gitignored under `images/`).
-- [ ] **Make the classes learnable.** `helicoil-2class-v1` is at **chance (50%)** — it
-  predicts "INCORRECT" for everything. Root cause: labels are the *intended* generation
-  state, but the images mostly don't render the defect (no visual signal). Fixes, pick:
-  (a) reference-conditioned generation so defects actually render; (b) restrict to
-  visually-obvious classes (e.g. present-and-seated vs empty/missing) before subtle ones;
-  (c) relabel by what's actually visible, not intended state. Also: more data (80 train is
-  tiny) and possibly class-weighting.
+- [x] **Stabilize training.** Added flip augmentation, box/cls loss weighting, and
+  best-checkpoint export to `fit` — training no longer exports a random late epoch.
+- [ ] **Make the classes learnable — still blocked on visual separability.** Tried the
+  full ladder: (1) original correct-vs-incorrect = chance (labels = intended state, defects
+  don't render); (2) seated-vs-empty with 284 balanced images + augmentation + best-ckpt =
+  **~79% best / ~60–65% typical, low confidence (~50–78%)**. Root cause (verified by eye,
+  `PREDICTIONS_seated_empty.png`): an **empty *tapped* hole looks like a helicoil** — both
+  are concentric thread-rings in a bore at 480px. The classes genuinely overlap. Real
+  fixes, untried: (a) train at native **1024px** (no downscale) so coil-wire vs cut-thread
+  texture is resolvable — most promising; (b) use a visually-distinct negative (plain
+  *drilled/unthreaded* hole or no-hole) — but that's a different question than QC; (c)
+  accept ~80% as the synthetic-data ceiling.
 
 ## Housekeeping
 
