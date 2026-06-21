@@ -10,6 +10,13 @@ actually contain a coil. Output is a COCO dataset:  <out>/images/*.png + annotat
 Usage:
     uv run python packages/tensor-factory-synth/scripts/build_ds.py [OUT_DIR] [N_REQUEST]
 
+This is a long (minutes) GPU + API job. Over SSH, run it under tmux so a dropped
+connection can't SIGHUP it mid-run:
+
+    scripts/run-bg tf-build \
+        uv run python packages/tensor-factory-synth/scripts/build_ds.py
+    tmux attach -t tf-build      # watch; detach with Ctrl-b then d
+
 OUT_DIR defaults to the durable (gitignored) home under examples/helicoils/images/real_ds.
 Needs GEMINI_API_KEY in the env for generation and the `gpu` extra for GroundingDINO.
 """

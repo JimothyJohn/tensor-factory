@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# run-bg — run a long job inside a named tmux session so it survives SSH drops.
+#
+# An SSH disconnect sends SIGHUP to every foreground process you launched, so a
+# generation/labeling/training run started directly over SSH dies mid-flight with no
+# error. tmux owns the process instead of your shell, so the job keeps running after the
+# connection drops; you reattach and pick up where it was.
+#
+# Usage:
+#   scripts/run-bg <session-name> <command...>
+#
+# Examples:
+#   scripts/run-bg tf-build uv run python packages/tensor-factory-synth/scripts/build_ds.py
+#   scripts/run-bg tf-train uv run tensor-factory-train fit --data examples/helicoils/images/real_ds
+#
+# Reattach / inspect / stop:
+#   tmux attach -t tf-build      # watch it live (detach again with Ctrl-b then d)
+#   tmux capture-pane -pt tf-build | tail -40   # peek without attaching
+#   tmux kill-session -t tf-build               # stop it
+#   tmux ls                                     # list running sessions
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: scripts/run-bg <session-name> <command...>" >&2
+  exit 2
+fi
+
+session="$1"
+shift
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tmux not found — install it (brew install tmux) so long jobs survive SSH drops." >&2
+  exit 1
+fi
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "tmux session '$session' already exists — attach with: tmux attach -t $session" >&2
+  echo "(kill it first with: tmux kill-session -t $session)" >&2
+  exit 1
+fi
+
+# Run the command, then drop to an interactive shell so the pane (and any error output)
+# stays inspectable after the job exits instead of the session vanishing.
+tmux new-session -d -s "$session" "$* ; echo; echo '[run-bg] command exited — pane kept open for inspection]'; exec ${SHELL:-/bin/zsh}"
+
+echo "started '$*' in tmux session '$session'"
+echo "  watch:    tmux attach -t $session     (detach: Ctrl-b then d)"
+echo "  peek:     tmux capture-pane -pt $session | tail -40"
+echo "  stop:     tmux kill-session -t $session"
