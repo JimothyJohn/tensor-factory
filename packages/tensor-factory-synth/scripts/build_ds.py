@@ -46,6 +46,9 @@ DEFAULT_OUT = REPO_ROOT / "examples" / "helicoils" / "images" / "real_ds"
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUT
 N_REQ = int(sys.argv[2]) if len(sys.argv) > 2 else 170  # request extra; we drop label failures
+# Optional reference photo (argv[3]): condition every generation on a real part so the
+# synthesized positives match the actual application domain, not generic text-to-image.
+REF = sys.argv[3] if len(sys.argv) > 3 else None
 SIZE = 480
 SEED0 = 100000  # disjoint from the sample seeds
 FEATURE = "threaded hole"
@@ -54,7 +57,10 @@ FEATURE = "threaded hole"
 
 # Varied prompts, insert-present states only.
 plan = [p for p in G.build_plan(N_REQ, SEED0) if p["qc_state"] != "missing"]
-print(f"plan: {len(plan)} insert-present images -> {OUT}")
+reference = Image.open(REF).convert("RGB") if REF else None
+print(
+    f"plan: {len(plan)} insert-present images -> {OUT}" + (f"  (reference: {REF})" if REF else "")
+)
 
 # --- Phase 1: generate concurrently (API, I/O bound) ---
 gen = NanoBananaGenerator()
@@ -64,7 +70,7 @@ def make(item: dict) -> dict:
     err = "unknown"
     for _ in range(2):
         try:
-            img = gen.generate(item["prompt"], item["seed"], size=SIZE).image
+            img = gen.generate(item["prompt"], item["seed"], size=SIZE, reference=reference).image
             img.save(OUT / "images" / item["file"])
             return {**item, "ok": True}
         except Exception as e:  # noqa: BLE001 - record and retry, then drop
