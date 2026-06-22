@@ -22,6 +22,19 @@ def default_model_path() -> Path:
     return Path(__file__).parent / "models" / DEFAULT_MODEL_NAME
 
 
+def _presence(class_id: int, class_names: list[str] | None) -> tuple[str | None, bool | None]:
+    """Resolve ``(class_name, present)`` from a predicted class id and the model's names.
+
+    ``present`` is False only when the fired class is the conventional ``"background"``
+    (no-object) class a negatives-trained model carries; any other class counts as a
+    detection. Returns ``(None, None)`` when the model has no embedded class names.
+    """
+    if not class_names or not (0 <= class_id < len(class_names)):
+        return None, None
+    name = class_names[class_id]
+    return name, name != "background"
+
+
 def resolve_model(model_path: str | None) -> str:
     path = Path(model_path) if model_path else default_model_path()
     if not path.exists():
@@ -67,6 +80,10 @@ def detect(
         _, class_id, class_score = classed
         result["class_id"] = class_id
         result["class_score"] = class_score
+        name, present = _presence(class_id, detector.class_names)
+        if name is not None:
+            result["class_name"] = name
+            result["present"] = present
     return result
 
 

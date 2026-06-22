@@ -9,6 +9,7 @@ lazily imported, so the pure-Python core stays dependency-free.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -49,6 +50,12 @@ class Detector:
         self.output_names = [o.name for o in self.session.get_outputs()]
         # A model trained with a class head also emits a "logits" output.
         self.has_classes = "logits" in self.output_names
+        # Class names, when the exporter embedded them, make the model self-describing:
+        # the runtime can map a class id to a name (and tell present from background)
+        # without hard-coding the training-time ordering.
+        meta = self.session.get_modelmeta().custom_metadata_map or {}
+        raw = meta.get("class_names")
+        self.class_names: list[str] | None = json.loads(raw) if raw else None
 
     def preprocess(self, image: Image.Image):
         from PIL import Image as PILImage

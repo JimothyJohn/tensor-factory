@@ -102,10 +102,32 @@ class _BoxDataset(Dataset):
         return x, y
 
 
+def _embed_class_names(path: Path, names: list[str]) -> None:
+    """Record class names in the ONNX file's metadata so the runtime is self-describing.
+
+    Lets inference map a class id to a name -- and tell *present* from *background* --
+    without hard-coding the training-time class ordering on the edge.
+    """
+    import onnx
+
+    model = onnx.load(str(path))
+    model.metadata_props.add(key="class_names", value=json.dumps(names))
+    onnx.save(model, str(path))
+
+
 def export_onnx(
-    model: nn.Module, out_path: str | Path, *, size: int, quantize: bool = True
+    model: nn.Module,
+    out_path: str | Path,
+    *,
+    size: int,
+    quantize: bool = True,
+    class_names: list[str] | None = None,
 ) -> Path:
-    """Export to ONNX on CPU, then dynamic-quantize weights to uint8."""
+    """Export to ONNX on CPU, then dynamic-quantize weights to uint8.
+
+    ``class_names`` (when the model has a class head) is embedded in the final file's
+    metadata so the runtime can resolve class ids to names.
+    """
     out = Path(out_path)
     model = model.to("cpu").eval()
     dummy = torch.zeros(1, 3, size, size)
@@ -133,6 +155,8 @@ def export_onnx(
         from onnxruntime.quantization import QuantType, quantize_dynamic
 
         quantize_dynamic(str(fp32), str(out), weight_type=QuantType.QUInt8)
+    if class_names:
+        _embed_class_names(out, class_names)
     return out
 
 
@@ -295,4 +319,4 @@ def fit(
         if classify:
             err, acc = _val_metrics(model, val_items, size, dev, classify=classify)
             print(f"BEST checkpoint: val err {err:.1f}px  class acc {acc:.0%}  classes={names}")
-    return export_onnx(model, out_path, size=size)
+    return export_onnx(model, out_path, size=size, class_names=names if classify else None)

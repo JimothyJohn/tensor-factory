@@ -85,6 +85,9 @@ def tensor_factory_detect(params: DetectInput) -> str:
           "image_size": {"width": int, "height": int},
           "model":      str
         }
+        A model with a presence/class head also returns "class_id" (int),
+        "class_score" (float), "class_name" (str), and "present" (bool -- False when
+        the no-object "background" class fired).
         On failure: "Error: <type>: <message>".
     """
     try:
