@@ -5,20 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>tensor-factory — synthetic data to tiny int8 detectors</title>
 <meta name="description" content="Open, lightweight tiny-CNN object detection. A factory for turning a prompt into a synthetic dataset, an int8 ONNX model, and a CPU inference harness." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  // Default to dark; honor a previously chosen light preference before first paint.
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --paper:    #f7f5ef;
-    --paper-2:  #f1eee5;
-    --ink:      #191712;
-    --ink-2:    #514c41;
-    --muted:    #837d6e;
-    --line:     #e2ddcf;
-    --line-2:   #d4cdba;
-    --accent:   #146a4b;
-    --accent-d: #0d4d36;
+    /* dark is the default theme (warm near-black to match the paper aesthetic) */
+    --paper:    #14120d;
+    --paper-2:  #1b1812;
+    --ink:      #ece7da;
+    --ink-2:    #b7b0a0;
+    --muted:    #8c8676;
+    --line:     #29261f;
+    --line-2:   #39342a;
+    --accent:   #58c08f;
+    --accent-d: #7ad3aa;
+    --code-bg:  #0d0c08;
+    --code-fg:  #e9e6dc;
 
     --serif: "Fraunces", Georgia, "Times New Roman", serif;
     --sans:  "Spline Sans", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -28,6 +36,20 @@
     --gut: clamp(1.4rem, 5vw, 4rem);
   }
 
+  :root[data-theme="light"] {
+    --paper:    #f7f5ef;
+    --paper-2:  #f1eee5;
+    --ink:      #191712;
+    --ink-2:    #514c41;
+    --muted:    #837d6e;
+    --line:     #e2ddcf;
+    --line-2:   #d4cdba;
+    --accent:   #146a4b;
+    --accent-d: #0d4d36;
+    --code-bg:  #191712;
+    --code-fg:  #e9e6dc;
+  }
+
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
   body {
@@ -35,6 +57,7 @@
     overflow-x: hidden;
     background: var(--paper);
     color: var(--ink);
+    transition: background-color .4s ease, color .4s ease;
     font-family: var(--sans);
     font-size: 17px;
     line-height: 1.65;
@@ -83,6 +106,31 @@
   }
   .nav a:hover { color: var(--ink); }
   .nav a:hover::after { transform: scaleX(1); }
+
+  .top-right { display: flex; align-items: center; gap: 1.3rem; }
+  .theme-toggle {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color .3s, border-color .3s, transform .3s cubic-bezier(.2,.7,.2,1);
+  }
+  .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .theme-toggle:active { transform: scale(.92); }
+  .theme-toggle svg { width: 1rem; height: 1rem; display: block; }
+  .theme-toggle .i-sun  { display: none; }
+  .theme-toggle .i-moon { display: none; }
+  :root:not([data-theme="light"]) .theme-toggle .i-sun { display: block; }  /* dark -> offer light (sun) */
+  :root[data-theme="light"] .theme-toggle .i-moon { display: block; }       /* light -> offer dark (moon) */
 
   /* ---- hero ---- */
   .hero { padding-block: clamp(4.5rem, 13vh, 9rem) clamp(3rem, 8vh, 6rem); }
@@ -185,8 +233,8 @@
   .prose { max-width: 54ch; color: var(--ink-2); margin: 0 0 1.8rem; }
   pre {
     margin: 0;
-    background: var(--ink);
-    color: #e9e6dc;
+    background: var(--code-bg);
+    color: var(--code-fg);
     border-radius: 4px;
     padding: 1.4rem 1.5rem;
     overflow-x: auto;
@@ -252,7 +300,13 @@
   <div class="col">
     <div class="top">
       <span class="brand">tensor<span class="dot">·</span>factory</span>
-      <nav class="nav"><a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a></nav>
+      <div class="top-right">
+        <nav class="nav"><a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a></nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -343,6 +397,26 @@ encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))   <span class="c"># (26, 26, 230, 230)</s
       <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
 
 </body>
 </html>
