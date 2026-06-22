@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 from tensor_factory import review
 from tensor_factory.formats import from_coco_bbox, to_coco_bbox
@@ -31,6 +32,29 @@ def http_image_url(base_url: str) -> Callable[[str], str]:
 def local_storage_url(prefix: str = "/data/local-files/?d=") -> Callable[[str], str]:
     """URL factory for Label Studio Local Storage references."""
     return lambda file_name: f"{prefix}{file_name}"
+
+
+def _file_name_from_ref(ref: str) -> str:
+    """Recover the dataset-relative file name from a Label Studio image reference.
+
+    The push wraps each file name in an image URL -- ``http_image_url`` ->
+    ``http://host/images/foo.png``; ``local_storage_url`` -> ``/data/local-files/?d=images/foo.png``.
+    The pull must invert that so COCO ``file_name`` matches the on-disk layout the
+    trainer loads (``images/foo.png``), rather than storing the raw URL.
+    """
+    if not ref:
+        return ref
+    parsed = urlparse(ref)
+    # Label Studio local storage: the file name is carried in the ?d= query param.
+    if parsed.query:
+        d = parse_qs(parsed.query).get("d")
+        if d:
+            return unquote(d[0])
+    # http(s) image server: keep the URL path, drop the leading slash.
+    if parsed.scheme:
+        return unquote(parsed.path).lstrip("/")
+    # Already a plain relative path.
+    return ref
 
 
 def _rect_result(box: BBox, label: str, width: int, height: int) -> dict[str, Any]:
@@ -121,7 +145,7 @@ def ls_export_to_coco(
 
         width = rects[0]["original_width"]
         height = rects[0]["original_height"]
-        file_name = (task.get("data") or {}).get(image_field, "")
+        file_name = _file_name_from_ref((task.get("data") or {}).get(image_field, ""))
         images.append(
             {
                 "id": image_id,

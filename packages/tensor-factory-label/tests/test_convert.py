@@ -62,6 +62,44 @@ def test_roundtrip_coco_to_ls_to_coco():
     assert back["annotations"][0]["review"] == review.APPROVED
     assert back["annotations"][0]["source"] == review.HUMAN
     assert back["images"][0]["review"] == review.APPROVED
+    # file_name must round-trip to the dataset-relative path the trainer loads,
+    # not the wrapped image URL the push handed Label Studio.
+    assert back["images"][0]["file_name"] == "images/a.png"
+
+
+@pytest.mark.unit
+def test_pull_recovers_dataset_relative_file_name():
+    """Regression: the pull must invert the push's image-URL wrapping so COCO
+    file_name matches the on-disk layout (e.g. ``images/sample_02.png``) instead of
+    storing the raw URL -- otherwise the trainer can't find the images."""
+    rect = {
+        "type": "rectanglelabels",
+        "original_width": 480,
+        "original_height": 480,
+        "value": {
+            "x": 10.0,
+            "y": 20.0,
+            "width": 50.0,
+            "height": 40.0,
+            "rectanglelabels": ["helicoil"],
+        },
+    }
+    # http image server (what relabel.sh uses)
+    http_export = [
+        {
+            "data": {"image": "http://localhost:8081/images/sample_02.png"},
+            "annotations": [{"result": [rect]}],
+        }
+    ]
+    assert ls_export_to_coco(http_export)["images"][0]["file_name"] == "images/sample_02.png"
+    # Label Studio local storage reference
+    ls_export = [
+        {
+            "data": {"image": "/data/local-files/?d=images/sample_02.png"},
+            "annotations": [{"result": [rect]}],
+        }
+    ]
+    assert ls_export_to_coco(ls_export)["images"][0]["file_name"] == "images/sample_02.png"
 
 
 @pytest.mark.unit
