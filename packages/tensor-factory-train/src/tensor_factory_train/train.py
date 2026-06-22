@@ -11,6 +11,7 @@ import copy
 import json
 import random
 import statistics
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,7 @@ from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import
 
 from tensor_factory.review import review_summary
 
-from .data import load_coco_boxes, load_coco_labeled
+from .data import load_coco_boxes, load_coco_labeled, load_negatives
 from .model import TinyDetector
 
 
@@ -52,11 +53,14 @@ def _flip_box(
 
 
 class _BoxDataset(Dataset):
-    """Yields ``(image, box)`` for box-only training, or ``(image, box, label)`` when
-    ``items`` carry a class id (3-tuples). One dataset, both heads.
+    """Yields ``(image, box)`` for box-only training, or ``(image, box, label, has_box)``
+    when ``items`` carry a class id (3-tuples ``(path, box | None, label)``). One dataset,
+    both heads.
 
-    ``augment`` adds random horizontal/vertical flips (image and box transformed together)
-    -- cheap regularization that markedly steadies training on small datasets.
+    A negative (background) item has ``box is None``: the image still trains the class
+    head, but ``has_box == 0`` masks it out of the box-regression loss -- a no-object frame
+    has no box to fit. ``augment`` adds random horizontal/vertical flips (image and box
+    transformed together; a box-less image just flips the pixels).
     """
 
     def __init__(
@@ -76,17 +80,25 @@ class _BoxDataset(Dataset):
         else:
             path, box = self.items[index]
         x = _load_chw(path, self.size)
-        coords = (box.x1, box.y1, box.x2, box.y2)
+        has_box = box is not None
+        coords = (box.x1, box.y1, box.x2, box.y2) if has_box else (0.0, 0.0, 0.0, 0.0)
         if self.augment:
             if random.random() < 0.5:
                 x = torch.flip(x, [2])  # width
-                coords = _flip_box(coords, horizontal=True)
+                if has_box:
+                    coords = _flip_box(coords, horizontal=True)
             if random.random() < 0.5:
                 x = torch.flip(x, [1])  # height
-                coords = _flip_box(coords, horizontal=False)
+                if has_box:
+                    coords = _flip_box(coords, horizontal=False)
         y = torch.tensor(coords, dtype=torch.float32)
         if self.labeled:
-            return x, y, torch.tensor(label, dtype=torch.long)
+            return (
+                x,
+                y,
+                torch.tensor(label, dtype=torch.long),
+                torch.tensor(float(has_box), dtype=torch.float32),
+            )
         return x, y
 
 
@@ -142,15 +154,18 @@ def _val_metrics(model, val_items, size, dev, *, classify) -> tuple[float, float
         for item in val_items:
             box = item[1]
             out = model(_load_chw(item[0], size).unsqueeze(0).to(dev))
-            pb = (out[0] if isinstance(out, tuple) else out)[0].cpu().numpy()
-            pcx, pcy = (pb[0] + pb[2]) / 2, (pb[1] + pb[3]) / 2
-            gcx, gcy = (box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2
-            errs.append(((pcx - gcx) ** 2 + (pcy - gcy) ** 2) ** 0.5 * size)
+            # Box error only where there is a box -- negatives (background) have none.
+            if box is not None:
+                pb = (out[0] if isinstance(out, tuple) else out)[0].cpu().numpy()
+                pcx, pcy = (pb[0] + pb[2]) / 2, (pb[1] + pb[3]) / 2
+                gcx, gcy = (box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2
+                errs.append(((pcx - gcx) ** 2 + (pcy - gcy) ** 2) ** 0.5 * size)
             if classify:
                 correct += int(out[1][0].argmax().item() == item[2])
     acc = correct / len(val_items) if classify else None
     model.train()
-    return statistics.median(errs), acc
+    # No positive in the val split -> no box error to report (0 penalty; acc still leads).
+    return (statistics.median(errs) if errs else 0.0), acc
 
 
 def fit(
@@ -171,6 +186,7 @@ def fit(
     augment: bool = False,
     weight_decay: float = 0.0,
     require_review: bool = True,
+    negatives: Sequence[str | Path] | None = None,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -184,6 +200,11 @@ def fit(
     With ``require_review`` (default) only human-validated annotations train; an
     all-pending dataset is refused with guidance to triage it first. ``require_review=False``
     trains on everything regardless of review state.
+
+    ``negatives`` is one or more directories of raw no-object images (e.g. machined parts
+    with holes but no helicoil). They force the class head on, add a trailing ``background``
+    class, and train it to report *absent*; box loss is masked out for them. This is what
+    lets the detector say "nothing here" instead of emitting a spurious box.
     """
     data_dir = Path(data_dir)
     coco = data_dir / "annotations.coco.json"
@@ -196,8 +217,16 @@ def fit(
         + ("" if require_review else "  (review gate OFF: training on all)")
     )
 
+    # Negatives add a background class, so the class head is mandatory when they are used.
+    classify = classify or bool(negatives)
     if classify:
         items, names = load_coco_labeled(coco, data_dir, require_review=require_review)
+        if negatives:
+            bg_label = len(names)
+            names = [*names, "background"]
+            neg_paths = [p for d in negatives for p in load_negatives(d)]
+            items = [*items, *[(p, None, bg_label) for p in neg_paths]]
+            print(f"negatives: +{len(neg_paths)} background images -> class {bg_label}")
     else:
         items, names = load_coco_boxes(coco, data_dir, require_review=require_review), []
     if not items:
@@ -231,9 +260,12 @@ def fit(
         for data in loader:
             optimizer.zero_grad()
             if classify:
-                x, yb, yc = data[0].to(dev), data[1].to(dev), data[2].to(dev)
+                x, yb, yc, m = (d.to(dev) for d in (data[0], data[1], data[2], data[3]))
                 pb, logits = model(x)
-                loss = box_weight * box_loss(pb, yb) + cls_weight * cls_loss(logits, yc)
+                # Box loss only over box-bearing items; negatives (mask 0) contribute none.
+                mb = m.bool()
+                box_term = box_loss(pb[mb], yb[mb]) if bool(mb.any()) else pb.sum() * 0.0
+                loss = box_weight * box_term + cls_weight * cls_loss(logits, yc)
             else:
                 x, yb = data[0].to(dev), data[1].to(dev)
                 loss = box_weight * box_loss(model(x), yb)

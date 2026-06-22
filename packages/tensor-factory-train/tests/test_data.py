@@ -3,7 +3,7 @@ import json
 import pytest
 
 from tensor_factory.geometry import BBox
-from tensor_factory_train.data import load_coco_boxes, load_coco_labeled
+from tensor_factory_train.data import load_coco_boxes, load_coco_labeled, load_negatives
 
 
 @pytest.mark.unit
@@ -107,6 +107,26 @@ def _mixed_review_coco():
         ],
         "categories": [{"id": 1, "name": "helicoil"}],
     }
+
+
+@pytest.mark.unit
+def test_load_negatives_finds_images_in_pool_layout(tmp_path):
+    # Pool layout <dir>/images/*.png (what gen_negatives.py writes).
+    imgs = tmp_path / "images"
+    imgs.mkdir()
+    for name in ("neg_00001.png", "neg_00000.png", "b.JPG", "notes.txt"):
+        (imgs / name).write_bytes(b"x")
+    found = load_negatives(tmp_path)
+    # Only images, sorted, with absolute paths -- no .txt.
+    assert [p.name for p in found] == ["b.JPG", "neg_00000.png", "neg_00001.png"]
+    assert all(p.is_absolute() for p in found)
+
+
+@pytest.mark.unit
+def test_load_negatives_flat_dir(tmp_path):
+    # No images/ subdir -> scan the dir directly.
+    (tmp_path / "a.png").write_bytes(b"x")
+    assert [p.name for p in load_negatives(tmp_path)] == ["a.png"]
 
 
 @pytest.mark.unit

@@ -52,14 +52,22 @@ def detect(
         width, height = img.size
         box = detector.detect_box(img)
         packed = detector.detect_uint8(img)
+        # A model trained with negatives has a presence/class head: report which class
+        # fired and its confidence. The box is still the 4xuint8 contract regardless.
+        classed = detector.detect(img) if detector.has_classes else None
     px = box.to_pixels(width=width, height=height)
-    return {
+    result: dict[str, Any] = {
         "box_norm": {"x1": box.x1, "y1": box.y1, "x2": box.x2, "y2": box.y2},
         "box_pixels": {"x1": px[0], "y1": px[1], "x2": px[2], "y2": px[3]},
         "uint8": list(packed),
         "image_size": {"width": width, "height": height},
         "model": resolved,
     }
+    if classed is not None:
+        _, class_id, class_score = classed
+        result["class_id"] = class_id
+        result["class_score"] = class_score
+    return result
 
 
 def model_info(

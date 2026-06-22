@@ -73,3 +73,20 @@ def load_coco_labeled(
         box = from_coco_bbox(ann["bbox"], width=im["width"], height=im["height"])
         items.append((root / im["file_name"], box, label_of[ann["category_id"]]))
     return items, names
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def load_negatives(images_dir: str | Path) -> list[Path]:
+    """List raw negative (no-object) image paths under ``images_dir``.
+
+    Negatives carry no annotation or box; they supply the *background* class that teaches
+    the detector to report *absent* instead of emitting a spurious box. Looks inside an
+    ``images/`` subdirectory when present (the pool layout ``<dir>/images/*.png``),
+    otherwise scans ``images_dir`` directly. There is no review gate -- a negative is
+    trainable by construction (it is, definitionally, a known absence).
+    """
+    d = Path(images_dir)
+    root = d / "images" if (d / "images").is_dir() else d
+    return sorted(p for p in root.iterdir() if p.is_file() and p.suffix.lower() in _IMAGE_EXTS)

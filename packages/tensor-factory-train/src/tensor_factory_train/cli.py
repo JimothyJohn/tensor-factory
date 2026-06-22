@@ -24,6 +24,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         cls_weight=args.cls_weight,
         augment=args.augment,
         require_review=not args.allow_unreviewed,
+        negatives=args.negatives,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -51,6 +52,13 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--box-weight", type=float, default=1.0, help="weight on the box loss")
     f.add_argument("--cls-weight", type=float, default=1.0, help="weight on the class loss")
     f.add_argument("--augment", action="store_true", help="random flip augmentation")
+    f.add_argument(
+        "--negatives",
+        nargs="+",
+        default=None,
+        help="dirs of raw no-object images -> a trailing 'background' class "
+        "(forces the presence head on; box loss is masked for them)",
+    )
     f.add_argument(
         "--allow-unreviewed",
         action="store_true",
