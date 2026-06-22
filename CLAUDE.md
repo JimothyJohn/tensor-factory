@@ -13,18 +13,30 @@ throughout (zero AGPL exposure — no Ultralytics).
 
 ## Current standing
 
-Five-package workspace, end-to-end pipeline working on synthetic data: **204 fps CPU
-@480px, 81 KB int8 model, ~1.9 px median localization**. The only committed model is the
-demo bundled in `tensor-factory-mcp`, trained on the **mock** generator — not photoreal yet.
+Five-package workspace, full pipeline working end to end: **204 fps CPU @480px, 81 KB int8
+model**. Architecture/throughput numbers hold across models; the ~1.9 px localization
+figure is on **mock** data (exact geometry). On real photoreal data, box localization is
+~25 px (the open quality ceiling — see [`TODO.md`](TODO.md)).
 
-- **Generation migrated FLUX.1-schnell → Nano Banana** (Gemini `gemini-2.5-flash-image`)
-  on branch `nano-banana-generation` — a hosted API call, no local GPU. Reads
-  `GEMINI_API_KEY` from the env. Not yet merged to `main`.
-- The reusable prompt system + 25 QC-inspection samples live in
-  [`examples/helicoils/SAMPLES.md`](examples/helicoils/SAMPLES.md) and
-  `examples/helicoils/images/` (`manifest.json` maps each to its prompt + seed + QC state).
-- Open work is tracked in [`TODO.md`](TODO.md). The next real milestone: train the
-  detector on a Nano-Banana-generated, GroundingDINO-labeled dataset.
+- **The only committed model** is the demo bundled in `tensor-factory-mcp`
+  (`helicoil-mock-v1.onnx`, mock generator). Real-data models live gitignored under
+  `examples/helicoils/images/`; current best is **`helicoil-presence-v3.onnx`** (real data
+  + a presence head, 88% held-out present/absent).
+- **Presence head / negatives.** The detector can now report *absent*: `--negatives DIR`
+  adds a `background` class (box loss masked for box-less negatives), and the MCP
+  `detect` returns `present` / `class_name` (class names embedded in the ONNX metadata, so
+  the model is self-describing). `gen_negatives.py` synthesizes machined-part negatives.
+- **Generation: FLUX.1-schnell → Nano Banana** (Gemini `gemini-2.5-flash-image`) on branch
+  `nano-banana-generation` — a hosted API call, no local GPU, reads `GEMINI_API_KEY`.
+  `build_ds.py <out> <n> <reference>` can condition generation on a real part photo for
+  application-matched realism. **Not yet merged to `main`.**
+- **Datasets** (all gitignored under `examples/helicoils/images/`): `real_ds` (110
+  human-validated positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-
+  labeled), `negatives_pool` (110 negatives), `real_ds_combined` (278, used to train v3).
+- **Human-review gate is optional.** Training enforces `review=approved` by default, but
+  `--allow-unreviewed` trains straight on GroundingDINO labels — the fast path (QC a
+  contact-sheet instead of hand-correcting every box). The prompt system + QC samples are
+  in [`SAMPLES.md`](examples/helicoils/SAMPLES.md) (`manifest.json` maps each).
 
 ## Detection contract
 

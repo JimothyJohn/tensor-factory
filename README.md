@@ -8,17 +8,21 @@ AGPL anywhere (Apache-2.0 throughout, no Ultralytics).
 
 The pipeline: **synthesize → auto-label → train → run.**
 
-1. **Synthesize** images from a prompt — hosted Gemini (Nano Banana) or a deterministic mock.
-2. **Auto-label** with GroundingDINO; refine in Label Studio if you want.
-3. **Train** a tiny soft-argmax CNN and export an int8 ONNX model.
-4. **Run** on CPU via onnxruntime — from a CLI or over MCP.
+1. **Synthesize** images from a prompt — hosted Gemini (Nano Banana) or a deterministic
+   mock. Optionally synthesize negatives (no-object frames) too.
+2. **Auto-label** with GroundingDINO; refine in Label Studio if you want, or train on the
+   raw labels directly (`--allow-unreviewed`).
+3. **Train** a tiny soft-argmax CNN and export an int8 ONNX model — optionally with a
+   presence head (`--negatives`) so it can report *absent*, not just a box.
+4. **Run** on CPU via onnxruntime — from a CLI or over MCP (box, plus `present`/`class_name`
+   when the model has a presence head).
 
 A detection is four `uint8` values (normalized `xyxy`, one byte each). At 480 px that's
 ~1.88 px per step — round-trip error under 1 px, inside the 3 px budget, and all
 post-processing stays in 8-bit math.
 
 **Reference numbers (helicoils example):** 204 fps CPU @480px · 81 KB int8 model · ~1.9 px
-median localization.
+median localization on mock data (real photoreal data is the harder, open case).
 
 ## Examples
 

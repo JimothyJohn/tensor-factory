@@ -27,13 +27,28 @@ tensor-factory-synth --backend gemini dataset --prompt "..." --features helicoil
 tensor-factory-synth triage --data data/
 ```
 
+## Scripts (`scripts/`)
+
+Beyond the CLI, three scripts drive the helicoils example:
+
+- `gen_samples.py` — the reusable QC-sample batch behind `SAMPLES.md` (`--reference` to
+  condition on a real photo).
+- `build_ds.py <out> <n> [reference]` — build a real positive dataset (Nano Banana generate
+  → GroundingDINO label → COCO). The optional 3rd arg conditions every generation on a real
+  part photo, so the output matches the actual application domain rather than generic
+  text-to-image.
+- `gen_negatives.py` — synthesize machined-part **negatives** (holes/features, no helicoil)
+  for the presence head. Raw, unlabeled background images; same visual domain as the
+  positives. Pair with `tensor-factory-train --negatives`.
+
 ## Review state
 
 Every annotation is stamped with a `review` state and a `source` (see
 [`tensor_factory.review`](../tensor-factory/src/tensor_factory/review.py)). GroundingDINO
-auto-labels are written `pending` — they are guesses and **not trainable** until a human
-validates them (via `tensor-factory-label`, which flips them to `approved`). The mock
-generator's boxes are exact ground truth, so they are `approved` on creation. The
-training loader enforces this gate by default, so unreviewed AI labels never enter a model.
+auto-labels are written `pending` — guesses, not trainable until validated (via
+`tensor-factory-label`, which flips them to `approved`). The mock generator's boxes are
+exact ground truth, so they are `approved` on creation. The training loader enforces this
+gate **by default**, so unreviewed AI labels never enter a model by accident — but
+`tensor-factory-train --allow-unreviewed` opts into raw labels deliberately (the fast path).
 
 Licensed under Apache-2.0.

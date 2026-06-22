@@ -6,62 +6,67 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 ## Now
 
 - [ ] **Merge the Nano Banana migration.** Branch `nano-banana-generation` (FLUX → Gemini
-  API) is committed but not merged — open a PR into `main`, get CI green, merge.
-- [ ] **Decide the fate of `examples/helicoils/images/` + `SAMPLES.md`.** Currently untracked. Either commit
-  them (sample gallery / fixtures) or add `examples/helicoils/images/` to `.gitignore` if it's scratch.
-- [x] **Helicoil fidelity in generated images.** Fixed for flush / recessed / missing /
-  damaged via "wound tight, no gaps, not a loose spring" + top-down angle + photoreal
-  suffix (see `SAMPLES.md`). `slightly_proud` and `cross_threaded` still render spring-like
-  from text alone — those need a reference photo (next item).
-- [ ] **Regenerate conditioned on a real reference photo.** `gen_samples.py --reference`
-  +`NanoBananaGenerator(reference=...)` are wired and verified. Need Nick to drop a real
-  macro of an installed (and ideally a proud / cross-threaded) Helicoil; then re-run the
-  batch so those states stop looking like springs.
+  API, + everything below) is committed but not merged — open a PR into `main`, get CI
+  green, merge.
+- [ ] **Box localization is the quality ceiling (~25 px median on real data).** More data
+  did *not* move it (110 → 278 positives left it ~unchanged). The limits are (1)
+  GroundingDINO boxes are loose — they bound the whole boss, not tight on the insert — and
+  (2) tiny-model + soft-argmax head capacity. Levers: tighten the loosest labels, a wider
+  model (`--width 24/32`), native 1024 px, or revisit the head. (The mock-trained model
+  hits ~1.9 px because mock geometry is exact; real photoreal data is the hard case.)
+- [ ] **Promote a real model to the bundled MCP demo.** `tensor-factory-mcp` still ships
+  `helicoil-mock-v1.onnx` (mock). Candidate: `helicoil-presence-v3.onnx` (real data +
+  presence head, so `present` ships by default). Left for a deliberate decision — the
+  bundled model is a committed artifact.
 
-## Next — the real dataset + model
+## Recently done (this session)
 
-- [x] **Generate a real labeled dataset.** Done — 142 Nano Banana images + GroundingDINO
-  auto-label (feature `"threaded hole"`, full-frame false-positive filtered) → COCO at
-  `/tmp/real_ds` (`annotations.coco.json` copied to `examples/helicoils/images/real_ds/`).
-- [x] **Train on real data.** Done — `helicoil-real-v1.onnx` (156 KB int8, width 24, 80
-  epochs, loss 0.0013→0.00035). **Localizes helicoils in held-out photoreal images** where
-  the mock model produced a top-left corner box. Proof: `examples/helicoils/images/RESULT_before_after.png`.
-- [ ] **Persist the builder + dataset into the repo.** `/tmp/build_ds.py` and the dataset
-  images are still ephemeral. Land the script under `packages/tensor-factory-synth/scripts/` (or
-  fold its varied-prompt + auto-label flow into the `dataset` CLI) and pick a durable home
-  (S3 / tracked artifacts) for images + model.
-- [ ] **Skipped human review.** Labels were trusted straight from GroundingDINO (no Label
-  Studio pass). For a production model, review them; spot-checks looked tight.
-- [ ] **Add empty-hole negatives.** Training used insert-present states only, so the model
-  will likely fire on any tapped hole (incl. `missing`). Add negatives / a confidence head.
-- [ ] **Consider swapping the bundled mcp demo model** from mock to `helicoil-real-v1`
-  (left as the mock for now — committed artifact, not touched autonomously).
+- [x] **Negative-aware training + presence head.** `--negatives DIR...` adds a trailing
+  `background` class, masks box loss for box-less negatives, and trains the model to report
+  *absent* instead of emitting a spurious box. `gen_negatives.py` synthesizes the
+  machined-part negatives (holes/features, no helicoil). Closes the old "add empty-hole
+  negatives / confidence head" item.
+- [x] **`present` / `class_name` in the MCP.** `export_onnx` embeds `class_names` in the
+  ONNX metadata (self-describing); `Detector` reads them; `core.detect` returns
+  `present` (False only when `background` fired), `class_name`, `class_id`, `class_score`.
+- [x] **Reference-conditioned generation for realism.** `build_ds.py <out> <n> <reference>`
+  conditions every Nano Banana generation on a real part photo — generated positives now
+  match the actual cast-aluminum application, not the generic microscope look.
+- [x] **More positives.** `real_ds_more` — 168 reference-conditioned, GroundingDINO-labeled
+  positives. Combined with `real_ds` (110) → `real_ds_combined` (278) for training.
+- [x] **Fast path past the manual-review bottleneck.** `--allow-unreviewed` trains directly
+  on GroundingDINO labels; a QC contact-sheet (render N images + boxes) replaces hours of
+  per-box clicking. Label Studio is now optional, for fixing specific bad labels.
+- [x] **`relabel.sh` parameterized by dataset dir** — shared Label Studio, a per-dataset
+  image server, so several datasets label concurrently.
+- [x] **Pull `file_name` bug fixed** — the Label Studio pull stored the image URL as the
+  COCO `file_name`; now inverted back to the dataset-relative path (regression-tested).
 
-## 2-class classifier (built; blocked on data)
+## Next — dataset + model quality
 
-- [x] **Add a class head to the detector.** Done — `TinyDetector(num_classes=…)` returns
-  `(box, logits)`, `fit(classify=True, val_frac=…)`, `Detector.detect()`, CLI `--classify`.
-  Trained `helicoil-2class-v1.onnx` (gitignored under `examples/helicoils/images/`).
-- [x] **Stabilize training.** Added flip augmentation, box/cls loss weighting, and
-  best-checkpoint export to `fit` — training no longer exports a random late epoch.
-- [x] **Make the classes learnable — DONE: helicoil vs missing at 86% val.**
-  `helicoil-vs-missing-v1.onnx` (gitignored under `examples/helicoils/images/`). Two fixes were needed:
-  (1) **distinct negative** — "missing" = clearly coil-less holes (plain drilled / blind /
-  counterbore), not empty *tapped* holes (which look like a coil); (2) **mean+max class
-  head** — global-average pooling alone washed out the coil-vs-smooth *texture*, capping
-  train acc at 84% on a trivial task; concat mean+max fixed it (train 100%, val 86%).
-  Held-out cross-batch ~69% (subtle/recessed helicoils get called "missing" — they look
-  coil-less). `PREDICTIONS_helicoil_vs_missing.png`.
-- [ ] **Push the classifier higher (optional).** More data + native 1024px (resolve coil
-  texture) for the subtle helicoils; the missing class is already ~90%+ high-confidence.
+- [ ] **Validate / tighten `real_ds_more` labels (optional, for box precision).** 168
+  GroundingDINO boxes, 39 corrected so far in Label Studio project 4. Only worth it if
+  chasing box precision — present/absent is already fine on the raw labels.
+- [ ] **Multi-dir training support.** Combining datasets is currently a manual merge into
+  one dir (`real_ds_combined`). Add multi-`--data` support to `fit`/the loaders so datasets
+  compose without copying images.
+- [ ] **Push precision higher (optional).** More data + native 1024 px (resolve coil
+  texture) and/or a wider model for the subtle, recessed helicoils.
+
+## 2-class classifier (built; the presence head now covers the absent case)
+
+- [x] **Class head on the detector.** `TinyDetector(num_classes=…)` → `(box, logits)`,
+  `fit(classify=True)`, `Detector.detect()`, CLI `--classify`. Mean+max pooled class head
+  (mean alone washed out coil-vs-smooth texture).
+- [x] **Best-checkpoint export + flip augmentation + box/cls loss weighting** in `fit` —
+  no more shipping a random late, overfit epoch. Val selection scores class accuracy over
+  all items and box error on positives only (so a collapsed box can't hide behind accuracy).
 
 ## Housekeeping
 
-- [x] **Move the sample-generation script into the repo.** Done — lives at
-  `packages/tensor-factory-synth/scripts/gen_samples.py` (source of truth for `SAMPLES.md`,
-  supports `--reference` for image-conditioned generation).
+- [x] **`examples/helicoils/images/` fate** — gitignored (scratch datasets/models; the
+  reference photo `Helicoil-Application.jpg` is gitignored too, pending provenance).
 - [ ] **Verify the `gpu` extra is minimal.** Confirm GroundingDINO actually needs
-  `accelerate`; prune it from `tensor-factory-synth`'s `gpu` extra if not. (`diffusers`,
-  `sentencepiece`, `protobuf` were already dropped with FLUX.)
-- [ ] **Rotate the HF token** that was pasted in plaintext in an earlier chat transcript.
+  `accelerate`; prune from `tensor-factory-synth`'s `gpu` extra if not.
+- [ ] **Rotate the HF token** pasted in plaintext in an earlier chat transcript.
   Generation no longer needs HF, but GroundingDINO still pulls public weights from it.

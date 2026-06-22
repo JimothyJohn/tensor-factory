@@ -8,11 +8,16 @@ with zero setup.
 
 | Tool | What it does |
 |---|---|
-| `tensor_factory_detect` | Detect the target object in an image → normalized, pixel, and 8-bit boxes |
+| `tensor_factory_detect` | Detect the target in an image → normalized, pixel, and 8-bit boxes |
 | `tensor_factory_model_info` | Resolved model path, input size, ORT providers |
 | `tensor_factory_benchmark` | CPU inference throughput (fps) |
 
 All tools are read-only and take an optional `model_path` to use your own ONNX model.
+
+A model trained with a **presence head** (`tensor-factory-train --negatives`) also makes
+`detect` return `present` (bool — `false` when the no-object `background` class fired),
+`class_name`, `class_id`, and `class_score`. Class names are read from the ONNX metadata,
+so the model is self-describing; box-only models simply omit these fields.
 
 ## Run
 
