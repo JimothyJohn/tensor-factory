@@ -39,7 +39,8 @@ median localization.
 ## Develop
 
 ```bash
-./Quickstart          # full gate: uv sync --locked → ruff check/format → ty check → pytest -m unit
+./Quickstart          # bootstrap (uv sync) + run the MCP detection server (try it out, no flag)
+./Quickstart -c       # full gate: uv sync --locked → ruff check/format → ty check → pytest -m unit
 ./Quickstart -u       # unit tests only
 ```
 

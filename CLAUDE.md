@@ -66,10 +66,11 @@ New libraries go under `packages/<name>/` with their own `pyproject.toml`; `[too
 
 ## Commands
 
-- `./Quickstart` — full local gate: `uv sync --locked` → `ruff check --fix` → `ruff format` → `ty check` → `pytest -m unit`. Run this before pushing.
+- `./Quickstart` — no flag: bootstrap (`uv sync --locked --all-packages`) then run the `tensor-factory-mcp` server (stdio, bundled demo model) so the project is runnable with zero setup. Stdio means it exits on EOF when no MCP client is attached — clients spawn it on demand via `.mcp.json`.
+- `./Quickstart -c` — full local gate: `uv sync --locked` → `ruff check --fix` → `ruff format` → `ty check` → `pytest -m unit`. Run this before pushing.
 - `./Quickstart -u` — unit tests only.
 - `./Quickstart -p` — full gate, then `uv build` + `uv publish` (needs `UV_PUBLISH_TOKEN`).
-- Direct: `uv run pytest`, `uv run ruff check`, `uv run ty check`. Always go through `uv run` — `ruff`/`ty` are dev deps, not on PATH globally.
+- Direct: `uv run python -m pytest`, `uv run ruff check`, `uv run ty check`. Always go through `uv run` — `ruff`/`ty` are dev deps, not on PATH globally. Use `python -m pytest` (not bare `uv run pytest`) so a pytest earlier on PATH can't shadow the locked one.
 
 ## Conventions
 
