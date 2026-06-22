@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# relabel.sh — bring up the human-validation stack for the real_ds dataset and push the
+# relabel.sh — bring up the human-validation stack for a dataset and push its
 # GroundingDINO candidates into Label Studio for review.
 #
-# Pipeline (see examples/helicoils/README.md): the 142 GroundingDINO boxes in real_ds are
+# Pipeline (see examples/helicoils/README.md): the GroundingDINO boxes are
 # review=pending (AI guesses, NOT trainable). You correct them in Label Studio, then pull
 # them back — the pull stamps review=approved, source=human, which is what makes them
 # trainable.
 #
-# Everything that needs to keep running (Label Studio :8080, the image server :8081) is
-# launched inside tmux via scripts/run-bg, so an SSH disconnect won't kill it. Reattach
-# any time with `tmux attach -t tf-labelstudio` / `tf-imgserver`.
+# Label Studio (:8080) is shared across datasets; each dataset gets its own image server
+# (session tf-img-<name>, a per-dataset port) so several can be labeled at once. Both run
+# inside tmux via scripts/run-bg, so an SSH disconnect won't kill them. Reattach with
+# `tmux attach -t tf-labelstudio` / `tmux attach -t tf-img-<name>`.
 #
 # Usage:
-#   examples/helicoils/relabel.sh            # start servers + push the dataset
-#   examples/helicoils/relabel.sh --stop     # tear the stack down
+#   examples/helicoils/relabel.sh [DATA_DIR]          # start servers + push (default: real_ds)
+#   examples/helicoils/relabel.sh --stop [DATA_DIR]   # stop that dataset's image server
 #
 # Then: open the printed URL, correct boxes, and run the printed `pull` command.
 set -euo pipefail
@@ -21,12 +22,20 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-DATA_DIR="examples/helicoils/images/real_ds"
-PROJECT_TITLE="helicoil real_ds v1"
-LS_SESSION="tf-labelstudio"
-IMG_SESSION="tf-imgserver"
+STOP=0
+if [[ "${1:-}" == "--stop" ]]; then
+  STOP=1
+  shift
+fi
+
+DATA_DIR="${1:-examples/helicoils/images/real_ds}"
+NAME="$(basename "$DATA_DIR")"
+PROJECT_TITLE="helicoil $NAME v1"
+LS_SESSION="tf-labelstudio"   # shared: one Label Studio hosts every dataset's project
+IMG_SESSION="tf-img-$NAME"    # one image server per dataset
 LS_PORT=8080
-IMG_PORT=8081
+# Stable per-dataset port in 8081-8090 so concurrent datasets don't collide on one port.
+IMG_PORT="${IMG_PORT:-$((8081 + $(printf '%s' "$NAME" | cksum | cut -d' ' -f1) % 10))}"
 RUN_BG="scripts/run-bg"
 
 # --- load .env (LABEL_STUDIO_*; GEMINI_API_KEY stays in the shell env) ---
@@ -37,10 +46,10 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-if [[ "${1:-}" == "--stop" ]]; then
-  tmux kill-session -t "$LS_SESSION" 2>/dev/null && echo "stopped $LS_SESSION" || true
+if [[ "$STOP" == "1" ]]; then
   tmux kill-session -t "$IMG_SESSION" 2>/dev/null && echo "stopped $IMG_SESSION" || true
-  echo "stack down. (The LS SQLite DB persists in ~/.local/share/label-studio.)"
+  echo "image server for $NAME down. Label Studio ($LS_SESSION) left running (shared);"
+  echo "stop it explicitly with: tmux kill-session -t $LS_SESSION"
   exit 0
 fi
 
@@ -107,7 +116,7 @@ uv run --package tensor-factory-label tensor-factory-label push \
 cat <<EOF
 
 == next ==
-1. Open the project URL printed above and correct the 142 boxes.
+1. Open the project URL printed above and correct the boxes.
 2. When done, pull the corrected labels back (this is what makes them trainable):
 
      uv run --package tensor-factory-label tensor-factory-label pull \\
