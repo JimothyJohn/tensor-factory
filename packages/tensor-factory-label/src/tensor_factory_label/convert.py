@@ -37,8 +37,8 @@ def local_storage_url(prefix: str = "/data/local-files/?d=") -> Callable[[str], 
 def _file_name_from_ref(ref: str) -> str:
     """Recover the dataset-relative file name from a Label Studio image reference.
 
-    The push wraps each file name in an image URL -- ``http_image_url`` ->
-    ``http://host/images/foo.png``; ``local_storage_url`` -> ``/data/local-files/?d=images/foo.png``.
+    The push wraps each file name in an image URL -- ``http_image_url`` gives
+    ``http://host/images/foo.png``; ``local_storage_url`` gives ``/data/local-files/?d=foo``.
     The pull must invert that so COCO ``file_name`` matches the on-disk layout the
     trainer loads (``images/foo.png``), rather than storing the raw URL.
     """
