@@ -18,18 +18,27 @@ model**. Architecture/throughput numbers hold across models; the ~1.9 px localiz
 figure is on **mock** data (exact geometry). On real photoreal data, box localization is
 ~25 px (the open quality ceiling — see [`TODO.md`](TODO.md)).
 
-- **The only committed model** is the demo bundled in `tensor-factory-mcp`
-  (`helicoil-mock-v1.onnx`, mock generator). Real-data models live gitignored under
-  `examples/helicoils/images/`; current best is **`helicoil-presence-v3.onnx`** (real data
-  + a presence head, 88% held-out present/absent).
-- **Presence head / negatives.** The detector can now report *absent*: `--negatives DIR`
-  adds a `background` class (box loss masked for box-less negatives), and the MCP
-  `detect` returns `present` / `class_name` (class names embedded in the ONNX metadata, so
-  the model is self-describing). `gen_negatives.py` synthesizes machined-part negatives.
-- **Generation: FLUX.1-schnell → Nano Banana** (Gemini `gemini-2.5-flash-image`) on branch
-  `nano-banana-generation` — a hosted API call, no local GPU, reads `GEMINI_API_KEY`.
-  `build_ds.py <out> <n> <reference>` can condition generation on a real part photo for
-  application-matched realism. **Not yet merged to `main`.**
+- **The bundled MCP model is now `helicoil-presence-v3.onnx`** (real data + presence head,
+  88% held-out present/absent) — promoted from the synthetic `helicoil-mock-v1.onnx`, which
+  is still bundled alongside it (box-only, selectable via `model_path`). Other real-data
+  models live gitignored under `examples/helicoils/images/`.
+- **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
+  stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
+  `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
+  `127.0.0.1` by default.
+- **Presence head / negatives.** The detector can report *absent*: `--negatives DIR`
+  adds a `background` class (box loss masked for box-less negatives), and `detect` returns
+  `present` / `class_name` (class names embedded in the ONNX metadata, so the model is
+  self-describing). `gen_negatives.py` synthesizes machined-part negatives.
+- **Soft-argmax gain (localization).** The coordinate head carries a learnable inverse-
+  softmax-temperature (`TinyDetector.log_gain`) so it can sharpen a diffuse heatmap before
+  the marginal expectation, countering the centre-bias that dominates real-data box error.
+  Init gain 1.0 = plain softmax (backward-compatible); `--freeze-gain` ablates it. Whether
+  it actually moves the ~25 px ceiling is being validated — see [`TODO.md`](TODO.md).
+- **Generation: FLUX.1-schnell → Nano Banana** (Gemini `gemini-2.5-flash-image`) — a hosted
+  API call, no local GPU, reads `GEMINI_API_KEY`. `build_ds.py <out> <n> <reference>` can
+  condition generation on a real part photo for application-matched realism. **Merged to
+  the base branch `master`** (this repo's default branch is `master`, not `main`).
 - **Datasets** (all gitignored under `examples/helicoils/images/`): `real_ds` (110
   human-validated positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-
   labeled), `negatives_pool` (110 negatives), `real_ds_combined` (278, used to train v3).

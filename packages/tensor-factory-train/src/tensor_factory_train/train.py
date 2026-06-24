@@ -211,6 +211,7 @@ def fit(
     weight_decay: float = 0.0,
     require_review: bool = True,
     negatives: Sequence[str | Path] | None = None,
+    learn_gain: bool = True,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -265,13 +266,16 @@ def fit(
     num_classes = len(names) if classify else 0
 
     train_items, val_items = _split(items, val_frac, seed)
+    # Seed torch so weight init is reproducible run-to-run -- the split is already seeded, so
+    # with this the only variable between two runs is the hyperparameters (e.g. the gain).
+    torch.manual_seed(seed)
     dev = resolve_device(device)
     loader = DataLoader(
         _BoxDataset(train_items, size, labeled=classify, augment=augment),
         batch_size=batch,
         shuffle=True,
     )
-    model = TinyDetector(width, num_classes).to(dev)
+    model = TinyDetector(width, num_classes, learn_gain=learn_gain).to(dev)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     box_loss = nn.SmoothL1Loss()
     cls_loss = nn.CrossEntropyLoss()
@@ -319,4 +323,5 @@ def fit(
         if classify:
             err, acc = _val_metrics(model, val_items, size, dev, classify=classify)
             print(f"BEST checkpoint: val err {err:.1f}px  class acc {acc:.0%}  classes={names}")
+    print(f"soft-argmax gain: {float(model.log_gain.exp()):.2f} (1.0 = plain softmax)")
     return export_onnx(model, out_path, size=size, class_names=names if classify else None)

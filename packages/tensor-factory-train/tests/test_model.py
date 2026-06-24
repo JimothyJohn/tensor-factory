@@ -7,7 +7,7 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 from tensor_factory.inference import Detector  # noqa: E402
-from tensor_factory_train.model import TinyDetector  # noqa: E402
+from tensor_factory_train.model import TinyDetector, soft_argmax_xyxy  # noqa: E402
 from tensor_factory_train.train import _flip_box, export_onnx, fit  # noqa: E402
 
 
@@ -19,6 +19,33 @@ def test_flip_box_is_a_mirror_involution():
     # flipping twice on the same axis restores the original
     once = _flip_box(box, horizontal=True)
     assert _flip_box(once, horizontal=True) == pytest.approx(box)
+
+
+@pytest.mark.unit
+def test_gain_sharpens_soft_argmax_toward_peak():
+    # An off-centre peak (cell 25 of 30, i.e. ~0.86) on every edge channel. A plain softmax
+    # (gain 1) over a near-flat logit field is pulled toward the 0.5 centre; raising the gain
+    # sharpens it so the marginal expectation climbs toward the true peak. This is exactly
+    # the centre-bias the gain exists to fix.
+    h = w = 30
+    heat = torch.zeros(1, 4, h, w)
+    heat[:, :, 25, 25] = 1.0  # modest peak -> diffuse at gain 1, sharp at high gain
+    low = soft_argmax_xyxy(heat, gain=1.0)
+    high = soft_argmax_xyxy(heat, gain=20.0)
+    peak = 25 / (h - 1)
+    # Every coordinate moves strictly closer to the peak as the gain rises.
+    assert bool((torch.abs(high - peak) < torch.abs(low - peak)).all())
+    # At high gain it lands near the peak; at gain 1 it sits well short (centre-pulled).
+    assert bool((torch.abs(high - peak) < 0.05).all())
+    assert bool((low < high).all())
+
+
+@pytest.mark.unit
+def test_learnable_gain_starts_at_unity():
+    # log_gain initialized to 0 -> exp -> 1.0, so a fresh model reproduces a plain softmax
+    # and any previously-trained behaviour is unchanged at init.
+    model = TinyDetector(width=8)
+    assert float(model.log_gain.exp()) == pytest.approx(1.0)
 
 
 @pytest.mark.unit

@@ -25,6 +25,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         augment=args.augment,
         require_review=not args.allow_unreviewed,
         negatives=args.negatives,
+        learn_gain=not args.freeze_gain,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -63,6 +64,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-unreviewed",
         action="store_true",
         help="train on un-validated labels too (default: only human-approved annotations)",
+    )
+    f.add_argument(
+        "--freeze-gain",
+        action="store_true",
+        help="freeze the soft-argmax gain at 1 (ablation; default lets it learn to sharpen)",
     )
     f.set_defaults(func=_cmd_fit)
     return parser

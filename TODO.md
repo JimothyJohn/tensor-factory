@@ -5,19 +5,34 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 
 ## Now
 
-- [ ] **Merge the Nano Banana migration.** Branch `nano-banana-generation` (FLUX → Gemini
-  API, + everything below) is committed but not merged — open a PR into `main`, get CI
-  green, merge.
-- [ ] **Box localization is the quality ceiling (~25 px median on real data).** More data
-  did *not* move it (110 → 278 positives left it ~unchanged). The limits are (1)
-  GroundingDINO boxes are loose — they bound the whole boss, not tight on the insert — and
-  (2) tiny-model + soft-argmax head capacity. Levers: tighten the loosest labels, a wider
-  model (`--width 24/32`), native 1024 px, or revisit the head. (The mock-trained model
-  hits ~1.9 px because mock geometry is exact; real photoreal data is the hard case.)
-- [ ] **Promote a real model to the bundled MCP demo.** `tensor-factory-mcp` still ships
-  `helicoil-mock-v1.onnx` (mock). Candidate: `helicoil-presence-v3.onnx` (real data +
-  presence head, so `present` ships by default). Left for a deliberate decision — the
-  bundled model is a committed artifact.
+- [ ] **Train + promote a gain-trained v4 to the bundled MCP demo.** The soft-argmax gain
+  (below) measurably improves localization; the bundle currently ships the pre-gain
+  `helicoil-presence-v3.onnx`. Train a v4 *with* the learnable gain on `real_ds_combined` +
+  `negatives_pool`, confirm it beats v3 on a fixed held-out set, then swap it into
+  `tensor-factory-mcp/src/.../models/` as the default.
+- [ ] **Box localization is the quality ceiling (~25 px median on real data).** The
+  soft-argmax gain helped (see below); remaining limits are (1) GroundingDINO boxes are
+  loose — they bound the whole boss, not tight on the insert — and (2) tiny-model capacity.
+  Further levers: tighten the loosest labels, a wider model (`--width 24/32`), native
+  1024 px. (The mock-trained model hits ~1.9 px because mock geometry is exact.)
+
+## Recently done (this session)
+
+- [x] **Merged the Nano Banana migration** into the base branch `master` (local
+  fast-forward; this repo's default branch is `master`, not `main`).
+- [x] **Promoted a real model to the bundled MCP demo.** `tensor-factory-mcp` now defaults
+  to `helicoil-presence-v3.onnx` (real data + presence head); the synthetic
+  `helicoil-mock-v1.onnx` stays bundled for the box-only path.
+- [x] **HTTP serving surface.** `tensor-factory-http` — a stdlib `http.server` endpoint
+  (zero extra deps) wrapping the same `core` inference: `POST /detect` (raw image bytes) →
+  the same JSON as the MCP tool, plus `/health` and `/model_info`. Lighter than MCP.
+- [x] **Soft-argmax gain (learnable inverse-temperature) on the coordinate head.** A plain
+  softmax of a diffuse heatmap pulls the marginal expectation toward the centre; the gain
+  lets the head sharpen first. A/B on `real_ds_combined` (frozen vs learnable, same
+  seed/split, two seeds) — learnable wins both: median val center-error **43.4 → 27.4 px**
+  (seed 0, gain → 1.35) and **39.3 → 13.0 px** (seed 1, gain → 1.06). The gain self-learns
+  above 1.0 every time. Backward-compatible (init 1.0 = plain softmax); `--freeze-gain`
+  ablates. Magnitudes are noisy on the small val split, but the direction is robust.
 
 ## Recently done (this session)
 
