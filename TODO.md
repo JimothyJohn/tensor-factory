@@ -10,6 +10,14 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
   `helicoil-presence-v3.onnx`. Train a v4 *with* the learnable gain on `real_ds_combined` +
   `negatives_pool`, confirm it beats v3 on a fixed held-out set, then swap it into
   `tensor-factory-mcp/src/.../models/` as the default.
+- [ ] **Model-in-the-loop pre-annotation (gated on v4 beating GroundingDINO).** Once the
+  detector's boxes are tighter than the raw GroundingDINO auto-labels (measured against the
+  human-approved subset as ground truth), close the loop: use the model itself to condition
+  and pre-annotate new data — first the *synthesized* set (Nano Banana output), then *real*
+  photos — replacing GroundingDINO as the label source. This bootstraps label quality off
+  the model instead of the open-vocab detector that currently caps it. The bar to start is
+  explicit: v4 median box error on the held-out approved set < the GroundingDINO labels'
+  error on that same set. Until then, GroundingDINO stays the labeler.
 - [ ] **Box localization is the quality ceiling (~25 px median on real data).** The
   soft-argmax gain helped (see below); remaining limits are (1) GroundingDINO boxes are
   loose — they bound the whole boss, not tight on the insert — and (2) tiny-model capacity.
