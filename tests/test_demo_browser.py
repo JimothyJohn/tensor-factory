@@ -46,21 +46,24 @@ def test_demo_detects_sample_in_a_real_browser():
                     pytest.skip(f"chromium unavailable: {exc}")
                 page = browser.new_page()
                 page.goto(f"http://127.0.0.1:{port}/demo.html")
-                # The page auto-detects the sample on load; the status badge resolves to a
-                # present/absent verdict. Wait for the mock model to localize the sample.
+                # The page auto-runs the (box-only) mock model on the sample at load. A
+                # completed inference populates the timing field with "<n> ms" -- a
+                # model-agnostic signal a detection ran. Generous timeout: cold WASM init +
+                # fetching the runtime from the CDN on first load.
                 try:
-                    page.wait_for_selector(
-                        "#status.badge.present, #status.badge.absent", timeout=30000
+                    page.wait_for_function(
+                        "() => /ms$/.test(document.getElementById('m-ms').textContent.trim())",
+                        timeout=60000,
                     )
                 except Exception as exc:  # noqa: BLE001 -- likely CDN/WASM blocked offline
                     err = page.text_content("#err-text") or ""
                     browser.close()
                     pytest.skip(f"demo did not resolve (offline CDN?): {err or exc}")
-                status = page.text_content("#status-text") or ""
                 u8 = page.text_content("#m-u8") or ""
+                norm = page.text_content("#m-norm") or ""
                 browser.close()
-                # The mock sample is a helicoil -> present, and four uint8 values were drawn.
-                assert "present" in status.lower()
+                # Four uint8 values and four normalized coords were drawn -- a real detection.
                 assert len([t for t in u8.split() if t.strip().isdigit()]) == 4
+                assert len(norm.split()) == 4
         except pw.Error as exc:
             pytest.skip(f"playwright runtime error: {exc}")
