@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dataset &amp; annotation guide — tensor-factory</title>
+<meta name="description" content="How to build and label an ideal helicoil training set: image requirements, box conventions, the manifestation label schema, the review gate, and the Label Studio loop. For contributors feeding their own images to the dataset." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html">Start</a>
+          <a href="pipeline.html">Pipeline</a>
+          <a href="dataset-guide.html" class="here">Dataset</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
+          <a href="cli.html">CLI</a>
+          <a href="api.html">API</a>
+          <a href="architecture.html">Internals</a>
+          <span class="nav-sep" aria-hidden="true"></span>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">Contributor guide</p>
+    <h1>Dataset &amp; <em>annotation</em></h1>
+    <p class="lede">
+      What makes an <em>ideal</em> helicoil training set, and exactly how to label it so it
+      trains a sharp detector. This is the guide for feeding <strong>your own images</strong>
+      into the dataset — image requirements, box conventions, the label schema, and the
+      review gate. It deliberately stops at the labeled dataset; running training on it is the
+      <a class="inline" href="pipeline.html">pipeline</a> and <a class="inline" href="cli.html">CLI</a>.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="scope">
+        <h2>What this covers</h2>
+        <p>
+          A detector is only as good as the boxes you draw. This page is about producing those
+          boxes well: which images to capture, how to frame and crop them, and how to annotate
+          and validate them so they pass the training gate. If you have a folder of helicoil
+          photos and want them to count, start here.
+        </p>
+        <div class="note">
+          <span class="tag">Out of scope</span>
+          <p>
+            <em>How training works</em> — loss, quantization, the soft-argmax head — lives in
+            <a class="inline" href="architecture.html">Internals</a>; the commands to run it
+            are in the <a class="inline" href="cli.html">CLI</a> and
+            <a class="inline" href="pipeline.html">pipeline</a>. You never touch those to
+            contribute data.
+          </p>
+        </div>
+      </section>
+
+      <section id="schema">
+        <h2>What you are labeling</h2>
+        <p>There are two detectors, and they want two different label depths:</p>
+        <ul>
+          <li>
+            <strong>Basic detection (shipping).</strong> One <strong>box</strong> per image
+            around the insert, class <code>helicoil</code> — plus <strong>negatives</strong>
+            (images with no insert) so the model can say <em>absent</em>. This is all the
+            shipping model needs.
+          </li>
+          <li>
+            <strong>Manifestation detection (next, label-blocked).</strong> The same box,
+            <em>plus</em> a <strong>state</strong>: how the insert is seated and whether it is
+            damaged. This is the model that can't train yet — precisely because these
+            state labels don't exist. Producing them is the whole point of contributing.
+          </li>
+        </ul>
+        <p>
+          The manifestation state splits into two independent axes — a <em>seating
+          measurement</em> and a <em>damage class</em> — because "too deep" and "cross-threaded"
+          are orthogonal. Each inspection state maps onto them:
+        </p>
+        <table>
+          <thead><tr><th>Inspection state</th><th>Presence</th><th>Seating</th><th>Damage class</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td><code>flush_pass</code></td><td>present</td><td>correct</td><td><code>ok</code></td><td>pass</td></tr>
+            <tr><td><code>slightly_recessed</code></td><td>present</td><td>over (too deep)</td><td><code>ok</code></td><td>fail</td></tr>
+            <tr><td><code>slightly_proud</code></td><td>present</td><td>under (too high)</td><td><code>ok</code></td><td>fail</td></tr>
+            <tr><td><code>cross_threaded</code></td><td>present</td><td>under / off-axis</td><td><code>cross_threaded</code></td><td>fail</td></tr>
+            <tr><td><code>damaged_coil</code></td><td>present</td><td>any</td><td><code>deformed</code></td><td>fail</td></tr>
+            <tr><td><code>missing</code></td><td><strong>absent</strong></td><td>—</td><td>—</td><td>fail (no box)</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Two damage classes the model defines — <code>broken_tang</code> and <code>burr</code>
+          — have <em>no reliable synthetic source</em> (text-to-image renders them as a spring),
+          so they need <strong>real photos</strong>. Flagging that gap is itself a useful
+          contribution.
+        </p>
+      </section>
+
+      <section id="ideal-set">
+        <h2>The ideal training set</h2>
+        <p>
+          Aim for <strong>breadth, balance, and box-size spread</strong> — in that order. A
+          thousand near-identical centered passes teach the model almost nothing; a few hundred
+          genuinely varied frames teach it a lot.
+        </p>
+        <h3>Composition</h3>
+        <ul>
+          <li>
+            <strong>Hundreds per state, not dozens.</strong> Each manifestation state needs
+            enough examples to learn from — target ~150–300 each, and keep them roughly
+            balanced. A state with 10 examples will be ignored or memorized, never learned.
+          </li>
+          <li>
+            <strong>~1 negative for every 2–3 positives.</strong> Empty tapped holes, bare
+            bosses, machined features that are <em>not</em> inserts. Without them the model
+            emits a box on every frame. See <a class="inline" href="#negatives">Negatives</a>.
+          </li>
+          <li>
+            <strong>Spread the box sizes.</strong> This is the single biggest lever for
+            localization. Shoot the same insert <em>filling the frame</em> and <em>small in a
+            wide field</em>. If every box is ~40% of the frame, the model never learns scale.
+          </li>
+          <li>
+            <strong>Vary everything that isn't the insert:</strong> angle (straight-down,
+            oblique, grazing), material (aluminum, anodized, steel), finish and grime, lighting
+            (even, harsh single-LED, dim microscope), thread size (M3/M6/M10), and defect
+            placement. Variation the model should be invariant to must appear in training.
+          </li>
+          <li>
+            <strong>Realistic, not pristine.</strong> Worn, gritty, uneven light, slightly soft
+            focus. Clean studio renders bias the model toward a look it won't see in the shop.
+          </li>
+        </ul>
+        <div class="note">
+          <span class="tag">Seed set you can label today</span>
+          <p>
+            The repo ships a generator that produces this exact taxonomy. It writes a batch of
+            photoreal inspection frames plus a <code>manifest.json</code> recording each
+            intended state — a ready-made pile to practice the annotation loop on:
+          </p>
+<pre><span class="c"># 48 photoreal samples across all 6 states -&gt; a gitignored dataset dir</span>
+uv run --with google-genai python \
+  packages/tensor-factory-synth/scripts/gen_samples.py \
+  --n 48 --out examples/helicoils/images/synth_manifestations</pre>
+          <p>
+            Needs a <code>GEMINI_API_KEY</code>. Filenames are neutral
+            (<code>sample_NN.png</code>) so you can review the boxes <em>blind</em>; the
+            intended state for each lives in the manifest, not the pixels. Full prompt catalog:
+            <code>examples/helicoils/SAMPLES.md</code>.
+          </p>
+        </div>
+      </section>
+
+      <section id="images">
+        <h2>Image requirements</h2>
+        <p>For each image you feed in:</p>
+        <ul>
+          <li><strong>Format:</strong> <code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.webp</code>, or <code>.bmp</code>.</li>
+          <li><strong>Resolution:</strong> ≥ 480 px on the short side (the model's input). Bigger is fine — it's downscaled. Don't upscale a tiny crop to fake it.</li>
+          <li><strong>One insert per frame.</strong> The detector is single-object: it labels the <em>first</em> annotation per image. Two inserts in one frame = an ambiguous label. Crop to one.</li>
+          <li><strong>The insert is sharp and unambiguous.</strong> If you can't tell where the coil ends, neither can the model. Soft <em>background</em> is fine and realistic; the insert itself should be in focus.</li>
+          <li><strong>Neutral filenames</strong> (<code>frame_0007.png</code>), so the verdict lives in the label, not the filename — that keeps review honest.</li>
+        </ul>
+      </section>
+
+      <section id="annotate">
+        <h2>The annotation process</h2>
+
+        <h3>1 — Draw the box on the <em>insert</em>, not the boss</h3>
+        <p>
+          The biggest quality lever, and the most common mistake. The box is the
+          <strong>coiled insert in the bore</strong> — not the counterbore, chamfer, or the
+          whole machined boss around it. Loose boxes that bound the boss are exactly what caps
+          the current model's localization. Crop tight to the visible coil, consistently, every
+          time. One box per image.
+        </p>
+        <div class="note warn">
+          <span class="tag">Tight, not generous</span>
+          <p>
+            When unsure where the edge is, err <em>tighter</em>. A consistently tight box trains
+            sharper localization than a generous one — and consistency matters more than any
+            single box being perfect.
+          </p>
+        </div>
+
+        <h3>2 — Add the label</h3>
+        <p>
+          For basic detection, the class is <code>helicoil</code>. For manifestations, label the
+          <strong>state</strong> from the <a class="inline" href="#schema">schema table</a> —
+          the seating (under / correct / over) and the damage class. Describe only what you
+          <em>see</em> in the seating and coil; the pass/fail verdict is derived from the state,
+          not annotated directly.
+        </p>
+
+        <h3>3 — Where the labels live</h3>
+        <p>
+          Annotations are <a class="inline" href="https://cocodataset.org/#format-data">COCO</a>
+          in <code>&lt;dataset&gt;/annotations.coco.json</code>, with the images alongside. Each
+          box is <code>bbox: [x, y, w, h]</code> in <strong>pixels</strong>, plus two keys the
+          training gate reads:
+        </p>
+<pre>{
+  "images": [{ "id": 1, "file_name": "frame_0007.png", "width": 480, "height": 480 }],
+  "annotations": [{
+    "id": 1, "image_id": 1, "category_id": 1,
+    "bbox": [54, 85, 147, 116],          <span class="c">// x, y, w, h in pixels — tight on the insert</span>
+    "review": "approved",                <span class="c">// pending | approved | rejected</span>
+    "source": "human"                    <span class="c">// human | groundingdino | synthetic_gt</span>
+  }],
+  "categories": [{ "id": 1, "name": "helicoil" }]
+}</pre>
+
+        <h3>4 — Pass the review gate</h3>
+        <p>
+          Only <code>review: "approved"</code> annotations ever enter training. The states:
+        </p>
+        <table>
+          <thead><tr><th>review</th><th>Meaning</th><th>Trains?</th></tr></thead>
+          <tbody>
+            <tr><td><code>pending</code></td><td>awaiting a human — the default for any auto-label, and for a <em>missing</em> review key</td><td>no</td></tr>
+            <tr><td><code>approved</code></td><td>a human validated it (or it is exact synthetic ground truth)</td><td><strong>yes</strong></td></tr>
+            <tr><td><code>rejected</code></td><td>reviewed and discarded</td><td>no</td></tr>
+          </tbody>
+        </table>
+        <p>
+          The rule is <strong>untrusted by default</strong>: an unmarked or auto-generated box
+          is <code>pending</code> until a person approves it. Don't approve a box you didn't
+          actually look at — a wrong "approved" is worse than an honest "pending".
+        </p>
+
+        <h3>5 — Label in the loop (optional but recommended)</h3>
+        <p>
+          <code>tensor-factory-label</code> drives <a class="inline" href="https://labelstud.io/">Label
+          Studio</a>: push your dataset in (with any auto-label predictions pre-drawn), correct
+          the boxes, pull the approved result back to COCO.
+        </p>
+<pre><span class="c"># point at your Label Studio (or set LABEL_STUDIO_URL / LABEL_STUDIO_API_KEY)</span>
+uv run tensor-factory-label push --data examples/helicoils/images/synth_manifestations \
+  --title helicoils --token "$LABEL_STUDIO_API_KEY"
+
+<span class="c"># ...correct boxes in the UI, mark them done...</span>
+
+uv run tensor-factory-label pull --project 7 \
+  --out examples/helicoils/images/synth_manifestations/annotations.coco.json
+
+<span class="c"># check how many are validated and would train</span>
+uv run tensor-factory-synth triage --data examples/helicoils/images/synth_manifestations</pre>
+        <p>
+          Prefer hand-editing the JSON for a few boxes? That's fine too — set
+          <code>review</code> yourself. Label Studio just makes the push → correct → pull loop
+          faster at volume.
+        </p>
+      </section>
+
+      <section id="negatives">
+        <h2>Negatives — teaching <em>absent</em></h2>
+        <p>
+          A negative is an image with <strong>no insert</strong>: an empty tapped hole, a bare
+          boss, a machined feature that looks vaguely like one but isn't. They carry
+          <strong>no box and no annotation</strong> — a negative is trainable by construction (a
+          known absence needs no review).
+        </p>
+        <p>
+          Drop them in their own directory; the loader scans the folder (or its
+          <code>images/</code> subfolder) directly:
+        </p>
+<pre>examples/helicoils/images/negatives_pool/
+  images/
+    empty_hole_001.png
+    bare_boss_014.png
+    ...                <span class="c"># no annotations.coco.json needed</span></pre>
+        <p>
+          Make negatives <em>hard</em>: the empty hole that most resembles a seated insert is
+          worth ten blank fields of metal. The synthetic generator's <code>missing</code> state
+          produces these, or use <code>gen_negatives.py</code>.
+        </p>
+      </section>
+
+      <section id="quality">
+        <h2>Quality bar &amp; common mistakes</h2>
+        <ul>
+          <li><strong>Box the insert, not the boss.</strong> The #1 error and the #1 lever.</li>
+          <li><strong>Be consistent.</strong> Uniform tightness across the set beats any one perfect box.</li>
+          <li><strong>One insert per image.</strong> Crop multi-insert frames down to one.</li>
+          <li><strong>Don't rubber-stamp.</strong> Approving an auto-label you didn't check poisons the set silently.</li>
+          <li><strong>Balance the states.</strong> A rare state with a handful of examples is noise, not signal.</li>
+          <li><strong>Spread box sizes and angles.</strong> All-centered, all-same-scale data caps localization.</li>
+          <li><strong>No near-duplicates.</strong> Ten frames of one part from one angle count as roughly one example.</li>
+          <li><strong>Keep it real.</strong> Grime, wear, uneven light — match the shop, not a render.</li>
+        </ul>
+      </section>
+
+      <section id="checklist">
+        <h2>Before you submit — checklist</h2>
+        <ul>
+          <li>☐ Every positive has exactly one box, tight on the insert.</li>
+          <li>☐ Boxes are consistent in how tight they crop.</li>
+          <li>☐ Manifestation labels follow the <a class="inline" href="#schema">schema</a> (seating + damage class).</li>
+          <li>☐ Negatives are present, hard, and box-free.</li>
+          <li>☐ States are roughly balanced; box sizes and angles vary.</li>
+          <li>☐ Every annotation you want trained is <code>review: "approved"</code>.</li>
+          <li>☐ <code>triage</code> reports the trainable count you expect.</li>
+        </ul>
+      </section>
+
+      <section id="next">
+        <h2>Where the data goes next</h2>
+        <ul>
+          <li><a class="inline" href="pipeline.html">The pipeline</a> — generate, auto-label, review, and train end to end (auto-labeling pre-draws boxes you then approve here).</li>
+          <li><a class="inline" href="cli.html">CLI reference</a> — the <code>tensor-factory-synth</code>, <code>-label</code>, and training commands.</li>
+          <li><a class="inline" href="architecture.html">Internals</a> — the review gate and why only approved labels train.</li>
+        </ul>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#scope">What this covers</a>
+      <a href="#schema">What you are labeling</a>
+      <a href="#ideal-set">The ideal training set</a>
+      <a href="#images">Image requirements</a>
+      <a href="#annotate">The annotation process</a>
+      <a href="#negatives">Negatives</a>
+      <a href="#quality">Quality &amp; mistakes</a>
+      <a href="#checklist">Checklist</a>
+      <a href="#next">Where next</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="pipeline.html"><span class="lbl">Prev</span>&larr; The pipeline</a>
+      <a class="nxt" href="demo.html"><span class="lbl">Next</span>Live demo &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var dark = root.getAttribute("data-theme") === "dark";
+        btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+        btn.setAttribute("aria-pressed", String(dark));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var dark = root.getAttribute("data-theme") === "dark";
+        if (dark) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "dark");
+        try { localStorage.setItem("tf-theme", dark ? "light" : "dark"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>
