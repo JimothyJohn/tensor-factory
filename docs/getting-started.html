@@ -23,10 +23,12 @@
         <nav class="nav">
           <a href="getting-started.html" class="here">Start</a>
           <a href="pipeline.html">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html">CLI</a>
           <a href="api.html">API</a>
           <a href="architecture.html">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -96,8 +98,8 @@ uv sync --locked --all-packages</pre>
           The <code>tensor-factory-mcp</code> package bundles two ready-to-run int8 models, so
           you can detect against one immediately. Point the core CLI at any image:
         </p>
-<pre><span class="c"># the bundled real-data model (presence head): helicoil-presence-v4.onnx</span>
-MODEL=packages/tensor-factory-mcp/src/tensor_factory_mcp/models/helicoil-presence-v4.onnx
+<pre><span class="c"># the bundled real-data model (presence head): helicoil-presence-v5.onnx</span>
+MODEL=packages/tensor-factory-mcp/src/tensor_factory_mcp/models/helicoil-presence-v5.onnx
 
 uv run tensor-factory detect --model "$MODEL" --image frame.png</pre>
         <p>Output is the box in both normalized and 8-bit form:</p>
@@ -113,7 +115,7 @@ uint8 (x1 y1 x2 y2): 54 85 201 201</pre>
         <table>
           <thead><tr><th>File</th><th>Trained on</th><th>Head</th></tr></thead>
           <tbody>
-            <tr><td><code>helicoil-presence-v4.onnx</code></td><td>real data</td><td>box + presence (reports <em>present / absent</em>)</td></tr>
+            <tr><td><code>helicoil-presence-v5.onnx</code></td><td>real data</td><td>box + presence (reports <em>present / absent</em>)</td></tr>
             <tr><td><code>helicoil-mock-v1.onnx</code></td><td>synthetic mock</td><td>box only</td></tr>
           </tbody>
         </table>
@@ -149,7 +151,7 @@ uint8 (x1 y1 x2 y2): 54 85 201 201</pre>
       "args": ["run", "--package", "tensor-factory-mcp", "tensor-factory-mcp"]
     }
 } }</pre>
-        <p>It exposes three read-only tools: <code>tensor_factory_detect</code>, <code>tensor_factory_model_info</code>, and <code>tensor_factory_benchmark</code>. See <a class="inline" href="cli.html#mcp">CLI &rsaquo; MCP</a>.</p>
+        <p>It exposes three read-only detection tools — full signatures in <a class="inline" href="cli.html#mcp">CLI &rsaquo; MCP</a>.</p>
 
         <h3>HTTP (stdlib)</h3>
         <p>When MCP is heavier than you need — a plain JSON endpoint over <code>http.server</code>, zero extra deps. It binds <code>127.0.0.1</code> by default:</p>

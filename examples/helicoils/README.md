@@ -37,12 +37,13 @@ uv run --with google-genai python packages/tensor-factory-synth/scripts/gen_nega
   --n 110 --out examples/helicoils/images/negatives_pool
 
 # 4. Train a tiny int8 detector. By default ONLY approved annotations train; an all-pending
-#    dataset is refused. --negatives adds a 'background' class (the presence head); the box
-#    output is unchanged. --allow-unreviewed trains straight on raw GroundingDINO labels.
+#    dataset is refused. --negatives turns on a YOLO-style objectness (presence) head and
+#    trains it toward 'absent', so the model can return *no box* on a no-helicoil frame.
+#    --allow-unreviewed trains straight on raw GroundingDINO labels.
 uv run tensor-factory-train fit --data data/ --out model.onnx --epochs 45 --device mps \
   --negatives examples/helicoils/images/negatives_pool --allow-unreviewed
 
-# 5. Run it on CPU. A presence-head model also reports present / class_name over MCP.
+# 5. Run it on CPU. A presence-head model also reports present / score over MCP (one box or none).
 uv run tensor-factory detect --model model.onnx --image some_frame.png
 uv run tensor-factory bench --model model.onnx
 ```

@@ -24,35 +24,43 @@ def test_default_model_exists():
 
 
 @pytest.mark.unit
-def test_presence_maps_class_to_name_and_flag():
-    names = ["helicoil", "background"]
-    assert core._presence(0, names) == ("helicoil", True)
-    assert core._presence(1, names) == ("background", False)
-    # No embedded names, or an out-of-range id -> undecidable.
-    assert core._presence(0, None) == (None, None)
-    assert core._presence(5, names) == (None, None)
-
-
-@pytest.mark.unit
-def test_detect_box_only_model_has_no_presence_fields(image, mock_model):
-    # A box-only model (no class head): no class_*/present keys leak in.
+def test_detect_box_only_model_always_has_a_box(image, mock_model):
+    # A box-only model (no presence head): no present/score keys, box always populated.
     out = core.detect(image, model_path=mock_model)
-    assert "present" not in out and "class_id" not in out
+    assert "present" not in out and "score" not in out
+    assert out["box_norm"] is not None and len(out["uint8"]) == 4
 
 
 @pytest.mark.unit
-def test_detect_presence_model_reports_present(image):
-    # The default model now carries a presence head -> class_*/present fields appear.
+def test_detect_presence_model_reports_present_and_box_or_none(image):
+    # The default model carries a presence head -> present/score appear, and the box is
+    # either a full box (present) or null (absent) -- one box or no box, never partial.
     out = core.detect(image)
     assert isinstance(out["present"], bool)
-    assert out["class_name"] in {"helicoil", "background"}
-    assert 0.0 <= out["class_score"] <= 1.0
+    assert 0.0 <= out["score"] <= 1.0
+    if out["present"]:
+        assert out["box_norm"] is not None and len(out["uint8"]) == 4
+    else:
+        assert out["box_norm"] is None and out["box_pixels"] is None and out["uint8"] is None
 
 
 @pytest.mark.unit
-def test_detect_shape_and_ranges(image):
+def test_detect_result_is_json_serializable_with_native_types(image):
+    # Regression: detect_presence returned a numpy float64, so `present` was numpy.bool_ --
+    # which json.dumps (the MCP/HTTP serving layers) cannot encode. present/score must be
+    # native python types and the whole dict must round-trip through JSON.
+    import json
+
     out = core.detect(image)
-    # The box/image fields are always present; a presence model adds class_* on top.
+    assert type(out["present"]) is bool
+    assert type(out["score"]) is float
+    json.dumps(out)  # must not raise
+
+
+@pytest.mark.unit
+def test_detect_shape_and_ranges(image, mock_model):
+    # Use the box-only model so a box is guaranteed; exercises the box/image-size contract.
+    out = core.detect(image, model_path=mock_model)
     assert {"box_norm", "box_pixels", "uint8", "image_size", "model"} <= set(out)
     assert out["image_size"] == {"width": 200, "height": 150}
     n = out["box_norm"]

@@ -23,10 +23,12 @@
         <nav class="nav">
           <a href="getting-started.html">Start</a>
           <a href="pipeline.html">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html">CLI</a>
           <a href="api.html">API</a>
           <a href="architecture.html" class="here">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -114,7 +116,7 @@ channels: 3 -&gt; c -&gt; 2c -&gt; 4c -&gt; 4c <span class="c"># c = --width (de
         </p>
         <ul>
           <li><strong>Init 0 → gain 1.0 → plain softmax</strong>, so existing checkpoints are unaffected and the optimizer is free to anneal it up.</li>
-          <li>It is <strong>one scalar parameter</strong> and exports cleanly to ONNX — no change to the box/logits output contract.</li>
+          <li>It is <strong>one scalar parameter</strong> and exports cleanly to ONNX — no change to the box/presence output contract.</li>
           <li><code>--freeze-gain</code> registers it as a buffer fixed at 1 (an ablation).</li>
         </ul>
         <div class="note">
@@ -127,29 +129,31 @@ channels: 3 -&gt; c -&gt; 2c -&gt; 4c -&gt; 4c <span class="c"># c = --width (de
           </p>
         </div>
 
-        <h3>The class / presence head</h3>
+        <h3>The presence head</h3>
         <p>
-          With <code>num_classes &gt; 0</code>, a head rides alongside the box head: concatenated
-          global <em>mean</em> and <em>max</em> pooling → a linear layer → logits. Mean alone washes
-          out texture (a coil and a smooth bore have near-identical channel averages); max captures
-          whether a discriminative texture fires anywhere. <code>forward</code> then returns
-          <code>(box, logits)</code>.
+          With <code>presence=True</code>, a single YOLO-style objectness head rides alongside the
+          box head: concatenated global <em>mean</em> and <em>max</em> pooling → a linear layer → one
+          logit. Mean alone washes out texture (a coil and a smooth bore have near-identical channel
+          averages); max captures whether a discriminative texture fires anywhere. <code>forward</code>
+          then returns <code>(box, presence)</code>, where <code>sigmoid(presence)</code> is
+          P(target present) — the runtime thresholds it to decide between one box and no box. There
+          is no class label and no <code>background</code> class.
         </p>
         <p>
-          <strong>Negatives</strong> (no-object images) add a trailing <code>background</code> class
-          and force the head on. Their box loss is masked (a no-object frame has no box to fit), so
-          they teach the model to report <em>absent</em> rather than emit a spurious box. That is
-          how <code>detect</code> can return <code>present: false</code>.
+          <strong>Negatives</strong> (no-object images) turn the presence head on and train its
+          objectness toward <em>absent</em> (target 0). Their box loss is masked (a no-object frame
+          has no box to fit), so they teach the model to report <em>absent</em> rather than emit a
+          spurious box. That is how <code>detect</code> can return <code>present: false</code>.
         </p>
       </section>
 
       <section id="training">
         <h2>Training &amp; checkpoint selection</h2>
         <ul>
-          <li><strong>Losses:</strong> Smooth-L1 on the box, cross-entropy on the class head, balanced by <code>--box-weight</code> / <code>--cls-weight</code> (the box loss is far smaller, so it's weighted up to keep the class gradient from drowning it).</li>
+          <li><strong>Losses:</strong> Smooth-L1 on the box, binary cross-entropy on the objectness logit, balanced by <code>--box-weight</code> / <code>--presence-weight</code> (the box loss is far smaller, so it's weighted up to keep the presence gradient from drowning it).</li>
           <li><strong>Determinism:</strong> the split is seeded and <code>torch.manual_seed(seed)</code> fixes weight init, so two runs differ only by hyperparameters — the A/B above is apples-to-apples.</li>
           <li><strong>Best-checkpoint export:</strong> with <code>--val-frac</code>, each epoch is scored <code>accuracy − err/size</code> (accuracy leads, but boxes count ~50× more than the old scaling), and the best state — not the last, possibly-overfit epoch — is what gets exported.</li>
-          <li><strong>Box error on positives only:</strong> negatives have no box, so a collapsed box can't hide behind classification accuracy.</li>
+          <li><strong>Box error on positives only:</strong> negatives have no box, so a collapsed box can't hide behind presence accuracy.</li>
         </ul>
       </section>
 
@@ -159,11 +163,11 @@ channels: 3 -&gt; c -&gt; 2c -&gt; 4c -&gt; 4c <span class="c"># c = --width (de
         <ol>
           <li><strong>Export on CPU</strong> (ONNX export from an MPS graph is unreliable). Legacy TorchScript exporter, opset 17 — a static tiny CNN needs nothing fancier, and it avoids the <code>onnxscript</code> dependency the dynamo exporter requires.</li>
           <li><strong>Dynamic quantization</strong> via onnxruntime: weights to <code>QUInt8</code>. This is what yields the ~81 KB int8 file.</li>
-          <li><strong>Embed class names</strong> in the ONNX <code>metadata_props</code> (<code>class_names</code> as JSON), so the model is self-describing — the runtime maps a class id to a name, and tells <em>present</em> from <em>background</em>, with no hard-coded training-time ordering.</li>
+          <li><strong>Fixed output names</strong> are the whole contract — the runtime reads each by name regardless of graph order, and the presence of a <code>presence</code> output is what tells it the model can say <em>absent</em>.</li>
         </ol>
         <p>
-          Output names are fixed: <code>image</code> in, <code>box</code> (and <code>logits</code>
-          for a class head) out, named so the runtime reads each by name regardless of graph order.
+          Output names are fixed: <code>image</code> in, <code>box</code> (and <code>presence</code>
+          for a presence-head model) out, named so the runtime reads each by name regardless of graph order.
           A dynamic batch axis is declared on every IO.
         </p>
       </section>

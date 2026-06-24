@@ -1,15 +1,18 @@
 """CPU inference for the tiny helicoil detector via onnxruntime.
 
 The model contract is fixed: input ``image`` is ``(1, 3, S, S)`` float32 in ``[0, 1]``
-(CHW, RGB), output ``box`` is ``(1, 4)`` float32 normalized ``xyxy`` in ``[0, 1]``. That
-is the whole interface between training and the edge -- decode to a :class:`BBox` (or the
-four ``uint8`` values) with the helpers here. onnxruntime + numpy are an ``infer`` extra,
-lazily imported, so the pure-Python core stays dependency-free.
+(CHW, RGB), output ``box`` is ``(1, 4)`` float32 normalized ``xyxy`` in ``[0, 1]``. A model
+trained with a presence head emits a second output ``presence`` of shape ``(1, 1)`` -- a
+raw objectness logit whose sigmoid is P(target present); the caller thresholds it to decide
+between *one box* and *no box*. That is the whole interface between training and the edge --
+decode to a :class:`BBox` (or the four ``uint8`` values) with the helpers here. onnxruntime
++ numpy are an ``infer`` extra, lazily imported, so the pure-Python core stays
+dependency-free.
 """
 
 from __future__ import annotations
 
-import json
+import math
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -48,14 +51,9 @@ class Detector:
         )
         self.input_name = self.session.get_inputs()[0].name
         self.output_names = [o.name for o in self.session.get_outputs()]
-        # A model trained with a class head also emits a "logits" output.
-        self.has_classes = "logits" in self.output_names
-        # Class names, when the exporter embedded them, make the model self-describing:
-        # the runtime can map a class id to a name (and tell present from background)
-        # without hard-coding the training-time ordering.
-        meta = self.session.get_modelmeta().custom_metadata_map or {}
-        raw = meta.get("class_names")
-        self.class_names: list[str] | None = json.loads(raw) if raw else None
+        # A model trained with a presence head also emits a "presence" output (one
+        # objectness logit). Box-only models have just "box".
+        self.has_presence = "presence" in self.output_names
 
     def preprocess(self, image: Image.Image):
         from PIL import Image as PILImage
@@ -85,21 +83,20 @@ class Detector:
         """Detection as four ``uint8`` -- the on-the-wire 8-bit contract."""
         return encode_uint8(self.detect_box(image))
 
-    def detect(self, image: Image.Image) -> tuple[BBox, int, float]:
-        """Box plus predicted class id and its softmax score (needs a class-head model).
+    def detect_presence(self, image: Image.Image) -> float:
+        """Probability the target is present: ``sigmoid(presence_logit)`` in ``[0, 1]``.
 
-        Raises if the model has no ``logits`` output -- use :meth:`detect_box` for the
+        The caller thresholds this to decide between returning one box and returning none.
+        Raises if the model has no ``presence`` output -- use :meth:`detect_box` for the
         box-only models.
         """
-        if not self.has_classes:
-            raise RuntimeError("model has no class head; use detect_box()")
+        if not self.has_presence:
+            raise RuntimeError("model has no presence head; use detect_box()")
         outs = self._run(image)
-        box = self._box_from(outs["box"])
-        logits = self._np.asarray(outs["logits"], dtype=self._np.float64).reshape(-1)
-        exp = self._np.exp(logits - logits.max())
-        probs = exp / exp.sum()
-        cls = int(probs.argmax())
-        return box, cls, float(probs[cls])
+        logit = float(self._np.asarray(outs["presence"], dtype=self._np.float64).reshape(-1)[0])
+        # Native float (not numpy) so the result stays json.dumps-able through the serving
+        # layers, and ``score >= threshold`` yields a plain bool rather than numpy.bool_.
+        return float(1.0 / (1.0 + math.exp(-logit)))
 
 
 def benchmark(detector: Detector, image: Image.Image, *, n: int = 100, warmup: int = 5) -> float:

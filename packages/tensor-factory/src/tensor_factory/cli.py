@@ -17,6 +17,13 @@ def _cmd_detect(args: argparse.Namespace) -> int:
 
     det = Detector(args.model, input_size=args.size)
     image = Image.open(args.image)
+    # A presence-head model can say "nothing here": below threshold, emit no box at all.
+    if det.has_presence:
+        score = det.detect_presence(image)
+        if score < 0.5:
+            print(f"absent (presence {score:.2f}) -- no box")
+            return 0
+        print(f"present (presence {score:.2f})")
     box = det.detect_box(image)
     u = det.detect_uint8(image)
     print(f"box   (norm xyxy): {box.x1:.4f} {box.y1:.4f} {box.x2:.4f} {box.y2:.4f}")

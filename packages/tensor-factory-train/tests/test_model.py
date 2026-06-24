@@ -67,7 +67,7 @@ def test_export_int8_onnx_is_loadable(tmp_path):
     box = det.detect_box(Image.new("RGB", (64, 64), (128, 128, 128)))
     assert 0.0 <= box.x1 <= 1.0
     assert box.x1 <= box.x2
-    assert not det.has_classes  # box-only model exposes no class head
+    assert not det.has_presence  # box-only model exposes no presence head
 
 
 @pytest.mark.unit
@@ -89,22 +89,21 @@ def test_fit_refuses_all_pending_dataset(tmp_path):
 
 
 @pytest.mark.unit
-def test_class_head_forward_shapes():
-    model = TinyDetector(width=8, num_classes=2)
-    box, logits = model(torch.zeros(3, 3, 64, 64))
+def test_presence_head_forward_shapes():
+    model = TinyDetector(width=8, presence=True)
+    box, presence = model(torch.zeros(3, 3, 64, 64))
     assert box.shape == (3, 4)
-    assert logits.shape == (3, 2)
+    assert presence.shape == (3, 1)  # one objectness logit per item
 
 
 @pytest.mark.unit
-def test_export_and_detect_class_roundtrip(tmp_path):
-    model = TinyDetector(width=8, num_classes=2)
+def test_export_and_detect_presence_roundtrip(tmp_path):
+    model = TinyDetector(width=8, presence=True)
     out = export_onnx(model, tmp_path / "m.onnx", size=64)
     det = Detector(out, input_size=64)
-    assert det.has_classes
-    box, cls, score = det.detect(Image.new("RGB", (64, 64), (128, 128, 128)))
+    assert det.has_presence
+    score = det.detect_presence(Image.new("RGB", (64, 64), (128, 128, 128)))
+    assert 0.0 <= score <= 1.0  # a probability, not a logit
+    # box-only API still works on a presence-head model
+    box = det.detect_box(Image.new("RGB", (64, 64), (10, 10, 10)))
     assert box.x1 <= box.x2
-    assert cls in (0, 1)
-    assert 0.0 <= score <= 1.0
-    # box-only API still works on a class-head model
-    assert det.detect_box(Image.new("RGB", (64, 64), (10, 10, 10))).x1 <= 1.0

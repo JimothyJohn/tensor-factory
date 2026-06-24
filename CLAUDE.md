@@ -18,19 +18,20 @@ model**. Architecture/throughput numbers hold across models; the ~1.9 px localiz
 figure is on **mock** data (exact geometry). On real photoreal data, box localization is
 ~25 px (the open quality ceiling — see [`TODO.md`](TODO.md)).
 
-- **The bundled MCP model is now `helicoil-presence-v4.onnx`** (real data + presence head +
-  the soft-argmax gain; ~20 px held-out box median, presence acc 84%) — promoted from the
-  synthetic `helicoil-mock-v1.onnx`, which is still bundled alongside it (box-only,
-  selectable via `model_path`). Other real-data models live gitignored under
-  `examples/helicoils/images/`.
+- **The bundled MCP model is now `helicoil-presence-v5.onnx`** (real data + YOLO-style
+  objectness/presence head + the soft-argmax gain) — promoted from the synthetic
+  `helicoil-mock-v1.onnx`, which is still bundled alongside it (box-only, selectable via
+  `model_path`). Other real-data models live gitignored under `examples/helicoils/images/`.
 - **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
   `127.0.0.1` by default.
-- **Presence head / negatives.** The detector can report *absent*: `--negatives DIR`
-  adds a `background` class (box loss masked for box-less negatives), and `detect` returns
-  `present` / `class_name` (class names embedded in the ONNX metadata, so the model is
-  self-describing). `gen_negatives.py` synthesizes machined-part negatives.
+- **Presence head / negatives.** The detector returns one box or none, YOLO-style. A single
+  objectness logit (`TinyDetector(presence=True)`, ONNX output `presence`) is trained by
+  `--negatives DIR`: positives → objectness 1, no-object negatives → objectness 0 with box
+  loss masked. `detect` thresholds `sigmoid(presence)` and returns `present` (bool) + `score`;
+  when absent the box fields come back `null`. No class label, no `background` class.
+  `gen_negatives.py` synthesizes machined-part negatives.
 - **Soft-argmax gain (localization).** The coordinate head carries a learnable inverse-
   softmax-temperature (`TinyDetector.log_gain`) so it can sharpen a diffuse heatmap before
   the marginal expectation, countering the centre-bias that dominates real-data box error.

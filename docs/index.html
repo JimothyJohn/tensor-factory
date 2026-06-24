@@ -24,10 +24,12 @@
         <nav class="nav">
           <a href="getting-started.html">Start</a>
           <a href="pipeline.html">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html">CLI</a>
           <a href="api.html">API</a>
           <a href="architecture.html">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -74,44 +76,34 @@
     <div class="col sec-pad">
       <p class="eyebrow">Fig. 02 — The pipeline</p>
       <div class="steps">
-        <div class="step"><div class="num">01</div><div><h3>Synthesize</h3><p>Generate images from a prompt — hosted Gemini (Nano Banana) or a deterministic mock that runs anywhere.</p></div></div>
-        <div class="step"><div class="num">02</div><div><h3>Auto-label</h3><p>GroundingDINO proposes boxes; refine them in Label Studio and pull clean COCO back out.</p></div></div>
-        <div class="step"><div class="num">03</div><div><h3>Train</h3><p>A tiny soft-argmax CNN — four stride-2 conv blocks — quantized down to an int8 ONNX model.</p></div></div>
-        <div class="step"><div class="num">04</div><div><h3>Run</h3><p>onnxruntime on CPU, driven from a CLI, an MCP server, or an HTTP endpoint. An edge-sized inference loop.</p></div></div>
+        <div class="step"><div class="num">01</div><div><h3>Synthesize</h3><p>Generate images from a prompt — hosted Gemini, or a mock that runs anywhere.</p></div></div>
+        <div class="step"><div class="num">02</div><div><h3>Auto-label</h3><p>GroundingDINO proposes boxes; a human gate approves them before they train.</p></div></div>
+        <div class="step"><div class="num">03</div><div><h3>Train</h3><p>A tiny soft-argmax CNN, quantized down to an 81&nbsp;KB int8 ONNX model.</p></div></div>
+        <div class="step"><div class="num">04</div><div><h3>Run</h3><p>onnxruntime on CPU — driven from a CLI, an MCP server, or an HTTP endpoint.</p></div></div>
       </div>
+      <p class="spec-note" style="margin-top:1.6rem">Point it at a new object and turn the crank — <a class="inline" href="pipeline.html">the pipeline, in full →</a></p>
     </div>
   </section>
 
-  <section id="contract">
+  <section id="docs">
     <div class="col sec-pad">
-      <p class="eyebrow">Fig. 03 — The detection contract</p>
-      <p class="prose">
-        Four bytes per detection. At 480&nbsp;px the quantization step is ~1.88&nbsp;px, so
-        round-trip error stays under 1&nbsp;px and all post-processing lives in 8-bit math.
-      </p>
-<pre><span class="c"># run a model on a frame, from the repo root</span>
-uv run tensor-factory detect --model model.onnx --image frame.png
+      <p class="eyebrow">Fig. 03 — The documentation</p>
 
-<span class="c"># or in Python</span>
-<span class="k">from</span> tensor_factory <span class="k">import</span> BBox, encode_uint8
-encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))   <span class="c"># (26, 26, 230, 230)</span></pre>
-    </div>
-  </section>
+      <h3 class="docs-group">Guides — get it running</h3>
+      <div class="pkg"><div class="name"><a href="getting-started.html">Getting started →</a></div><p class="desc">Clone, sync, and run the bundled int8 detector on CPU in under a minute. No GPU, no API keys.</p></div>
+      <div class="pkg"><div class="name"><a href="pipeline.html">The pipeline →</a></div><p class="desc">The five steps that turn a prompt into your own detector — synthesize, label, review, train, run.</p></div>
+      <div class="pkg"><div class="name"><a href="demo.html">Live demo →</a></div><p class="desc">Run the helicoil detector in your browser, entirely client-side.</p></div>
 
-  <section id="packages">
-    <div class="col sec-pad">
-      <p class="eyebrow">Fig. 04 — Five packages</p>
-      <div class="pkg"><div class="name">tensor-factory</div><p class="desc">Core: BBox geometry, the 4×uint8 codec, annotation formats, ONNX inference + CLI. Dependency-free, CPU-only.</p></div>
-      <div class="pkg"><div class="name">tensor-factory-synth</div><p class="desc">Generation (Nano Banana / Gemini) plus GroundingDINO auto-label and COCO / Label Studio export.</p></div>
-      <div class="pkg"><div class="name">tensor-factory-train</div><p class="desc">The tiny soft-argmax detector, exported to int8 ONNX.</p></div>
-      <div class="pkg"><div class="name">tensor-factory-mcp</div><p class="desc">MCP <span class="star">+</span> HTTP servers exposing the detector, with bundled models.</p></div>
-      <div class="pkg"><div class="name">tensor-factory-label</div><p class="desc">Label Studio integration: push candidates, pull corrected labels.</p></div>
+      <h3 class="docs-group">Reference — every flag, function, and internal</h3>
+      <div class="pkg"><div class="name"><a href="cli.html">CLI reference →</a></div><p class="desc">Every command and flag across the five packages, plus the install extras and env vars.</p></div>
+      <div class="pkg"><div class="name"><a href="api.html">Python API →</a></div><p class="desc">BBox geometry, the 8-bit codec, the Detector, the review gate, and the training functions.</p></div>
+      <div class="pkg"><div class="name"><a href="architecture.html">Internals →</a></div><p class="desc">Why a detection is four bytes, the soft-argmax model and its learnable gain, int8 quantization, and the review gate.</p></div>
     </div>
   </section>
 
   <section id="example">
     <div class="col sec-pad">
-      <p class="eyebrow">Fig. 05 — Examples</p>
+      <p class="eyebrow">Fig. 04 — Examples</p>
       <div class="example">
         <span class="tag">Example 01</span>
         <h3>Helicoil detection</h3>

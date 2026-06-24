@@ -18,10 +18,10 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         size=args.size,
         width=args.width,
         device=args.device,
-        classify=args.classify,
+        presence=args.presence,
         val_frac=args.val_frac,
         box_weight=args.box_weight,
-        cls_weight=args.cls_weight,
+        presence_weight=args.presence_weight,
         augment=args.augment,
         require_review=not args.allow_unreviewed,
         negatives=args.negatives,
@@ -45,20 +45,22 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--width", type=int, default=16, help="model channel width")
     f.add_argument("--device", default=None, help="cuda/mps/cpu (default: auto)")
     f.add_argument(
-        "--classify",
+        "--presence",
         action="store_true",
-        help="train a class head too (categories from the COCO file)",
+        help="add a YOLO-style objectness head (auto-on when --negatives is given)",
     )
     f.add_argument("--val-frac", type=float, default=0.0, help="held-out fraction for metrics")
     f.add_argument("--box-weight", type=float, default=1.0, help="weight on the box loss")
-    f.add_argument("--cls-weight", type=float, default=1.0, help="weight on the class loss")
+    f.add_argument(
+        "--presence-weight", type=float, default=1.0, help="weight on the objectness loss"
+    )
     f.add_argument("--augment", action="store_true", help="random flip augmentation")
     f.add_argument(
         "--negatives",
         nargs="+",
         default=None,
-        help="dirs of raw no-object images -> a trailing 'background' class "
-        "(forces the presence head on; box loss is masked for them)",
+        help="dirs of raw no-object images that train the objectness head toward 'absent' "
+        "(turns the presence head on; box loss is masked for them)",
     )
     f.add_argument(
         "--allow-unreviewed",

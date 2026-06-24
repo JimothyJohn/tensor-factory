@@ -9,7 +9,6 @@ and the structural wiring the page depends on.
 from __future__ import annotations
 
 import filecmp
-import re
 from pathlib import Path
 
 import pytest
@@ -34,12 +33,12 @@ def html() -> str:
 def test_demo_assets_exist():
     assert DEMO.is_file()
     assert (DEMO_MODELS / "helicoil-mock-v1.onnx").is_file()
-    assert (DEMO_MODELS / "helicoil-presence-v4.onnx").is_file()
+    assert (DEMO_MODELS / "helicoil-presence-v5.onnx").is_file()
     assert (DOCS / "sample-helicoil.png").is_file()
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", ["helicoil-mock-v1.onnx", "helicoil-presence-v4.onnx"])
+@pytest.mark.parametrize("name", ["helicoil-mock-v1.onnx", "helicoil-presence-v5.onnx"])
 def test_demo_models_match_the_bundled_package_models(name):
     # The demo must serve byte-identical models to what tensor-factory-mcp bundles -- not a
     # stale copy that quietly diverges from the shipped detector.
@@ -48,7 +47,7 @@ def test_demo_models_match_the_bundled_package_models(name):
 
 @pytest.mark.unit
 def test_demo_models_load_and_satisfy_the_contract():
-    for name in ("helicoil-mock-v1.onnx", "helicoil-presence-v4.onnx"):
+    for name in ("helicoil-mock-v1.onnx", "helicoil-presence-v5.onnx"):
         det = Detector(DEMO_MODELS / name, input_size=SIZE)
         box = det.detect_box(Image.new("RGB", (SIZE, SIZE), (128, 128, 128)))
         assert 0.0 <= box.x1 <= 1.0 and box.x1 <= box.x2
@@ -72,21 +71,33 @@ def test_bundled_sample_is_detected_by_the_mock_model():
 
 
 @pytest.mark.unit
-def test_demo_class_names_match_model_metadata(html):
-    # The page hard-codes presence class names (the browser can't read ONNX custom metadata).
-    # They MUST equal what the model file embeds, or the demo will mislabel present/absent.
-    m = re.search(r"presence:\s*\{[^}]*classes:\s*\[([^\]]*)\]", html)
-    assert m, "could not find the presence model's classes array in demo.html"
-    js_names = [s.strip().strip('"').strip("'") for s in m.group(1).split(",") if s.strip()]
-    embedded = Detector(DEMO_MODELS / "helicoil-presence-v4.onnx", input_size=SIZE).class_names
-    assert js_names == embedded, f"demo.html classes {js_names} != model metadata {embedded}"
+def test_demo_presence_model_has_presence_head_and_no_class_metadata():
+    # The presence model is YOLO-style: it exposes a "presence" output (one objectness
+    # logit) and carries no class names -- absence is the low tail of one score, not a class.
+    det = Detector(DEMO_MODELS / "helicoil-presence-v5.onnx", input_size=SIZE)
+    assert det.has_presence, "presence model must expose a 'presence' output"
+    score = det.detect_presence(Image.new("RGB", (SIZE, SIZE), (128, 128, 128)))
+    assert 0.0 <= score <= 1.0
+
+
+@pytest.mark.unit
+def test_demo_thresholds_presence_with_a_sigmoid(html):
+    # The page must read the objectness output and sigmoid-threshold it (present vs. no box),
+    # not decode class logits. Pins the wiring so the demo can't drift from the model.
+    assert 'out["presence"]' in html, "demo.html must read the 'presence' output"
+    assert "sigmoid" in html, "demo.html must sigmoid the objectness logit"
+    assert "threshold" in html, "demo.html must threshold presence to decide box vs. no box"
+    # The old class-logits path is gone (these strings are unique to it; "background" alone
+    # would collide with CSS background: properties, so match the actual removed code).
+    assert 'out["logits"]' not in html
+    assert "softmaxArgmax" not in html and "classes:" not in html
 
 
 @pytest.mark.unit
 def test_demo_references_runtime_and_assets(html):
     assert "onnxruntime-web" in html  # WASM runtime
     assert "models/helicoil-mock-v1.onnx" in html
-    assert "models/helicoil-presence-v4.onnx" in html
+    assert "models/helicoil-presence-v5.onnx" in html
     assert "sample-helicoil.png" in html
     assert "<canvas" in html and 'id="file"' in html  # the interactive surface
 
@@ -115,7 +126,9 @@ def test_demo_is_linked_from_every_doc_page():
 
 
 @pytest.mark.unit
-def test_no_stale_v3_model_reference_in_docs():
-    # v4 is the bundled default; nothing user-facing should still point at v3.
+def test_no_stale_model_reference_in_docs():
+    # v5 is the bundled default; nothing user-facing should still point at a superseded one.
     for p in DOCS.glob("*.html"):
-        assert "presence-v3" not in p.read_text(encoding="utf-8"), p.name
+        text = p.read_text(encoding="utf-8")
+        assert "presence-v3" not in text, p.name
+        assert "presence-v4" not in text, p.name

@@ -16,12 +16,14 @@ localization error on real photos. The gain lets the head sharpen the heatmap be
 taking the expectation, pushing the soft-argmax toward the true peak; at ``gain == 1`` it
 reproduces the original behaviour exactly, so existing checkpoints are unaffected and the
 optimizer is free to anneal it up. It is one scalar parameter and exports cleanly to ONNX
-(no change to the box/logits output contract).
+(no change to the box/presence output contract).
 
-With ``num_classes > 0`` a global-pooled linear head rides alongside the box head, so the
-same backbone also classifies the detection (e.g. helicoil vs. not-inserted-correctly).
-``forward`` then returns ``(box, logits)``; with ``num_classes == 0`` it returns just the
-box, so existing single-output models and their exports are unchanged.
+With ``presence=True`` a single global-pooled objectness logit rides alongside the box
+head -- YOLO-style: sigmoid(logit) is the probability the target is present, so the runtime
+returns one box when it clears a threshold and *nothing* when it doesn't. ``forward`` then
+returns ``(box, presence_logit)``; with ``presence=False`` it returns just the box, so
+existing single-output models and their exports are unchanged. There is no class label and
+no "background" class -- absence is the low tail of one objectness score.
 """
 
 from __future__ import annotations
@@ -57,10 +59,10 @@ def soft_argmax_xyxy(heat, gain=1.0):  # noqa: ANN001, ANN201
 
 
 class TinyDetector(nn.Module):
-    def __init__(self, width: int = 16, num_classes: int = 0, learn_gain: bool = True) -> None:
+    def __init__(self, width: int = 16, presence: bool = False, learn_gain: bool = True) -> None:
         super().__init__()
         c = width
-        self.num_classes = num_classes
+        self.presence = presence
         # 480 -> 240 -> 120 -> 60 -> 30 (4 stride-2 blocks, no final pool).
         self.features = nn.Sequential(
             _block(3, c),
@@ -78,16 +80,17 @@ class TinyDetector(nn.Module):
             self.log_gain = nn.Parameter(log_gain)
         else:
             self.register_buffer("log_gain", log_gain)
-        # Optional class head: concat of global *mean* and *max* pooling -> logits. Mean
-        # alone washes out texture (a coil and a smooth bore have near-identical channel
-        # averages); max captures whether a discriminative texture fires anywhere.
-        self.classifier = nn.Linear(8 * c, num_classes) if num_classes else None
+        # Optional presence head: one objectness logit from a concat of global *mean* and
+        # *max* pooling. Mean alone washes out texture (a coil and a smooth bore have
+        # near-identical channel averages); max captures whether a discriminative texture
+        # fires anywhere. sigmoid(logit) is P(target present).
+        self.presence_head = nn.Linear(8 * c, 1) if presence else None
 
     def forward(self, x):  # noqa: ANN001, ANN201
         f = self.features(x)
         box = soft_argmax_xyxy(self.heat(f), gain=self.log_gain.exp())
-        if self.classifier is not None:
+        if self.presence_head is not None:
             pooled = torch.cat([f.mean(dim=(2, 3)), f.amax(dim=(2, 3))], dim=1)  # B,8c
-            logits = self.classifier(pooled)
-            return box, logits
+            presence_logit = self.presence_head(pooled)  # B,1
+            return box, presence_logit
         return box

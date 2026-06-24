@@ -85,9 +85,9 @@ def tensor_factory_detect(params: DetectInput) -> str:
           "image_size": {"width": int, "height": int},
           "model":      str
         }
-        A model with a presence/class head also returns "class_id" (int),
-        "class_score" (float), "class_name" (str), and "present" (bool -- False when
-        the no-object "background" class fired).
+        A model with a presence head also returns "present" (bool) and "score" (float, the
+        objectness probability). When "present" is false the target is absent and "box_norm"
+        / "box_pixels" / "uint8" are null -- no box at all.
         On failure: "Error: <type>: <message>".
     """
     try:

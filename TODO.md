@@ -27,6 +27,42 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
   Further levers: tighten the loosest labels, a wider model (`--width 24/32`), native
   1024 px. (The mock-trained model hits ~1.9 px because mock geometry is exact.)
 
+## Model 2 — advanced manifestation detection (v6, ⚠ BLOCKED on labels)
+
+**Two models, deliberately separate.** Model 1 = **basic object detection** (v5, box+presence,
+shipping). Model 2 = **this**: damage + insertion manifestations. **Model 2 is blocked — no
+dataset has damage/seating labels** (all current data is box+presence, state "ok"). Item 3 is
+the blocker; items 4–6 wait on it. Item 1 (architecture) is done and unit-tested but
+**untrained**. Real-data training goes via Gemini/Nano Banana (`GEMINI_API_KEY`) + a labeling
+pass — there is no synthetic shortcut that produces meaningful damage/seating labels.
+
+Capacity/roadmap analysis: [`MODEL_SIZE.md`](MODEL_SIZE.md). v5 (box + YOLO-style objectness)
+is the tiny base and doubles as the SBC **stage-1** region proposer; v6 adds a **stage-2 crop
+head** that reports state on the high-res crop. Insertion is a *measurement* (regress a signed
+seating depth → over/correct/under), damage is a *classification*
+(`ok/deformed/cross_threaded/broken_tang/burr`). A PC teacher then trains + pre-annotates, and
+the SBC student distils down to an MCU good/bad flag. Spend resolution only on the crop; keep
+stage 1 MCU-portable.
+
+- [x] **1. Stage-2 crop head (architecture).** `Stage2Head` on the predicted-box crop: damage
+  softmax + signed `seating` regressor, plus a `crop_to_box` stage-1→2 bridge and int8 ONNX
+  export (`damage`/`seating` outputs). Self-contained in
+  [`tensor_factory_train.stage2`](packages/tensor-factory-train/src/tensor_factory_train/stage2.py),
+  fully unit-tested (`tests/test_stage2.py`). Purely additive — the v5 detector is untouched.
+  **Architecture only: the heads are untrained until item 3 lands the data.**
+- [ ] **2. Label schema.** Damage classes + insertion target (seating scalar now; keypoints/
+  mask later for a true geometric measurement). Extend the dataset format + loaders (folds
+  into the multi-`--data` item below).
+- [ ] **3. Per-failure-mode data (⚠ THE BLOCKER — the long pole).** Synthesize damaged/over/
+  under variants with Nano Banana (reuse `build_ds.py` reference conditioning, `GEMINI_API_KEY`);
+  backfill real photos under controlled lighting; label damage class + seating. Hundreds per
+  mode. **Nothing below trains until this lands — model 2 is blocked here, not on capacity.**
+- [ ] **4. PC teacher.** Larger multi-task backbone @1024px; use it to pre-annotate (bootstrap
+  label quality past GroundingDINO). Ties into the model-in-the-loop item under "Now".
+- [ ] **5. SBC two-stage student**, distilled from the teacher (soft targets + seg distill).
+- [ ] **6. Distill + coarsen to MCU** — single-stage v5 shape + one binary `suspect` flag,
+  width 8 / 128px / int8.
+
 ## Recently done (this session)
 
 - [x] **In-browser demo (`docs/demo.html`).** Runs the bundled int8 models entirely

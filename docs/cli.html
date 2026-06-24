@@ -23,10 +23,12 @@
         <nav class="nav">
           <a href="getting-started.html">Start</a>
           <a href="pipeline.html">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html" class="here">CLI</a>
           <a href="api.html">API</a>
           <a href="architecture.html">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -172,12 +174,12 @@
             <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
             <tr><td><code>--width</code></td><td><code>16</code></td><td>model channel width</td></tr>
             <tr><td><code>--device</code></td><td>auto</td><td><code>cuda</code>/<code>mps</code>/<code>cpu</code> (default resolves cuda → mps → cpu)</td></tr>
-            <tr><td><code>--classify</code></td><td>off</td><td>train a class head (categories from the COCO file)</td></tr>
+            <tr><td><code>--presence</code></td><td>off</td><td>add a YOLO-style objectness head (auto-on when <code>--negatives</code> is given)</td></tr>
             <tr><td><code>--val-frac</code></td><td><code>0.0</code></td><td>held-out fraction for metrics + best-checkpoint export</td></tr>
             <tr><td><code>--box-weight</code></td><td><code>1.0</code></td><td>weight on the box loss</td></tr>
-            <tr><td><code>--cls-weight</code></td><td><code>1.0</code></td><td>weight on the class loss</td></tr>
+            <tr><td><code>--presence-weight</code></td><td><code>1.0</code></td><td>weight on the objectness loss</td></tr>
             <tr><td><code>--augment</code></td><td>off</td><td>random flip augmentation</td></tr>
-            <tr><td><code>--negatives</code></td><td>none</td><td>one or more dirs of no-object images → a <code>background</code> class (forces presence head; box loss masked)</td></tr>
+            <tr><td><code>--negatives</code></td><td>none</td><td>one or more dirs of no-object images that train the objectness head toward <em>absent</em> (turns the presence head on; box loss masked)</td></tr>
             <tr><td><code>--allow-unreviewed</code></td><td>off</td><td>train on un-validated labels too (default: only human-approved)</td></tr>
             <tr><td><code>--freeze-gain</code></td><td>off</td><td>freeze the soft-argmax gain at 1 (ablation; default lets it learn)</td></tr>
           </tbody>
@@ -222,13 +224,13 @@
 
       <section id="mcp">
         <h2>tensor-factory-mcp</h2>
-        <p>FastMCP server over stdio. Defaults to the bundled <code>helicoil-presence-v4.onnx</code>.</p>
+        <p>FastMCP server over stdio. Defaults to the bundled <code>helicoil-presence-v5.onnx</code>.</p>
         <div class="sig">tensor-factory-mcp [--version]</div>
         <p>Three read-only tools, each taking an optional <code>model_path</code> and <code>input_size</code> (16–4096, default 480):</p>
         <table>
           <thead><tr><th>Tool</th><th>Returns</th></tr></thead>
           <tbody>
-            <tr><td><code>tensor_factory_detect</code></td><td>box (norm/pixel/uint8), image size, model — plus <code>present</code>/<code>class_name</code>/<code>class_id</code>/<code>class_score</code> for a presence-head model</td></tr>
+            <tr><td><code>tensor_factory_detect</code></td><td>box (norm/pixel/uint8), image size, model — plus <code>present</code>/<code>score</code> for a presence-head model (box fields are <code>null</code> when absent)</td></tr>
             <tr><td><code>tensor_factory_model_info</code></td><td>resolved model, input size, input name, ORT providers</td></tr>
             <tr><td><code>tensor_factory_benchmark</code></td><td>fps over <code>n</code> iterations (1–10000, default 100)</td></tr>
           </tbody>

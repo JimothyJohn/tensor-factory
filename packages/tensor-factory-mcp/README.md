@@ -2,7 +2,7 @@
 
 An MCP server that exposes a tensor-factory detector as tools over stdio — plus a
 lightweight HTTP endpoint for callers that just want JSON over HTTP. Ships with a bundled
-int8 model (`helicoil-presence-v4.onnx`, real-data detector with a presence head) so it
+int8 model (`helicoil-presence-v5.onnx`, real-data detector with a presence head) so it
 works with zero setup; the synthetic box-only demo (`helicoil-mock-v1.onnx`) is bundled
 too and selectable via `model_path`.
 
@@ -17,9 +17,10 @@ too and selectable via `model_path`.
 All tools are read-only and take an optional `model_path` to use your own ONNX model.
 
 A model trained with a **presence head** (`tensor-factory-train --negatives`) also makes
-`detect` return `present` (bool — `false` when the no-object `background` class fired),
-`class_name`, `class_id`, and `class_score`. Class names are read from the ONNX metadata,
-so the model is self-describing; box-only models simply omit these fields.
+`detect` return `present` (bool) and `score` (the objectness probability). It's YOLO-style:
+when `present` is `false` the target is absent and the box fields (`box_norm`, `box_pixels`,
+`uint8`) come back `null` — one box or no box at all. Box-only models omit `present`/`score`
+and always return a box.
 
 ## Run
 

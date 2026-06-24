@@ -14,25 +14,15 @@ from typing import Any
 from tensor_factory.inference import Detector
 from tensor_factory.inference import benchmark as _benchmark
 
-DEFAULT_MODEL_NAME = "helicoil-presence-v4.onnx"
+DEFAULT_MODEL_NAME = "helicoil-presence-v5.onnx"
 DEFAULT_INPUT_SIZE = 480
+# A presence-head model returns a box only when sigmoid(objectness) clears this. Below it,
+# the detection is "nothing here" -- no box at all, the YOLO-style no-object case.
+PRESENCE_THRESHOLD = 0.5
 
 
 def default_model_path() -> Path:
     return Path(__file__).parent / "models" / DEFAULT_MODEL_NAME
-
-
-def _presence(class_id: int, class_names: list[str] | None) -> tuple[str | None, bool | None]:
-    """Resolve ``(class_name, present)`` from a predicted class id and the model's names.
-
-    ``present`` is False only when the fired class is the conventional ``"background"``
-    (no-object) class a negatives-trained model carries; any other class counts as a
-    detection. Returns ``(None, None)`` when the model has no embedded class names.
-    """
-    if not class_names or not (0 <= class_id < len(class_names)):
-        return None, None
-    name = class_names[class_id]
-    return name, name != "background"
 
 
 def resolve_model(model_path: str | None) -> str:
@@ -50,34 +40,51 @@ def _detector(model_path: str, input_size: int) -> Detector:
     return Detector(model_path, input_size=input_size)
 
 
+def _box_fields(detector: Detector, img: Any, width: int, height: int) -> dict[str, Any]:
+    """The box portion of the result: normalized, pixel, and 4xuint8 forms."""
+    box = detector.detect_box(img)
+    px = box.to_pixels(width=width, height=height)
+    return {
+        "box_norm": {"x1": box.x1, "y1": box.y1, "x2": box.x2, "y2": box.y2},
+        "box_pixels": {"x1": px[0], "y1": px[1], "x2": px[2], "y2": px[3]},
+        "uint8": list(detector.detect_uint8(img)),
+    }
+
+
 def _detect_image(img: Any, resolved: str, detector: Detector) -> dict[str, Any]:
     """Build the detection result dict from an already-opened RGB ``PIL.Image``.
 
     Shared by :func:`detect` (path in) and :func:`detect_bytes` (HTTP body in) so the
     two entry points return byte-identical JSON.
+
+    A presence-head model returns one box or none: ``present`` (bool) and ``score`` (the
+    objectness probability) are always set, and the box fields are populated only when the
+    target is present -- otherwise ``box_norm`` / ``box_pixels`` / ``uint8`` are ``null``.
+    A box-only model has no presence head, so it always returns a box and omits
+    ``present`` / ``score``.
     """
     width, height = img.size
-    box = detector.detect_box(img)
-    packed = detector.detect_uint8(img)
-    # A model trained with negatives has a presence/class head: report which class fired
-    # and its confidence. The box is still the 4xuint8 contract regardless.
-    classed = detector.detect(img) if detector.has_classes else None
-    px = box.to_pixels(width=width, height=height)
     result: dict[str, Any] = {
-        "box_norm": {"x1": box.x1, "y1": box.y1, "x2": box.x2, "y2": box.y2},
-        "box_pixels": {"x1": px[0], "y1": px[1], "x2": px[2], "y2": px[3]},
-        "uint8": list(packed),
         "image_size": {"width": width, "height": height},
         "model": resolved,
     }
-    if classed is not None:
-        _, class_id, class_score = classed
-        result["class_id"] = class_id
-        result["class_score"] = class_score
-        name, present = _presence(class_id, detector.class_names)
-        if name is not None:
-            result["class_name"] = name
-            result["present"] = present
+    if detector.has_presence:
+        score = detector.detect_presence(img)
+        present = score >= PRESENCE_THRESHOLD
+        result["present"] = present
+        result["score"] = score
+        box = (
+            _box_fields(detector, img, width, height)
+            if present
+            else {
+                "box_norm": None,
+                "box_pixels": None,
+                "uint8": None,
+            }
+        )
+        result.update(box)
+    else:
+        result.update(_box_fields(detector, img, width, height))
     return result
 
 

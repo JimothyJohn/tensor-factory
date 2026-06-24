@@ -23,10 +23,12 @@
         <nav class="nav">
           <a href="getting-started.html">Start</a>
           <a href="pipeline.html">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html">CLI</a>
           <a href="api.html" class="here">API</a>
           <a href="architecture.html">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -124,8 +126,8 @@ max_error_px(480)                        <span class="c"># ~0.94 px (under the 3
           CPU inference via onnxruntime, behind the <code>infer</code> extra (lazy-imported, so the
           pure-Python core stays dependency-free). The fixed contract: input <code>image</code> is
           <code>(1, 3, S, S)</code> float32 in <code>[0, 1]</code> (CHW, RGB); output <code>box</code>
-          is <code>(1, 4)</code> normalized <code>xyxy</code>; a class-head model adds a
-          <code>logits</code> output.
+          is <code>(1, 4)</code> normalized <code>xyxy</code>; a presence-head model adds a
+          <code>presence</code> output (one objectness logit).
         </p>
         <div class="sig">Detector(model_path, *, input_size=480, providers=None)</div>
         <table>
@@ -133,10 +135,9 @@ max_error_px(480)                        <span class="c"># ~0.94 px (under the 3
           <tbody>
             <tr><td><code>.detect_box(image)</code></td><td>a <code>BBox</code></td></tr>
             <tr><td><code>.detect_uint8(image)</code></td><td>the four-<code>uint8</code> tuple</td></tr>
-            <tr><td><code>.detect(image)</code></td><td><code>(BBox, class_id, score)</code> — needs a class head, else raises</td></tr>
+            <tr><td><code>.detect_presence(image)</code></td><td>P(target present) — <code>sigmoid(presence_logit)</code>; needs a presence head, else raises</td></tr>
             <tr><td><code>.preprocess(image)</code></td><td>the <code>(1,3,S,S)</code> float32 input array</td></tr>
-            <tr><td><code>.has_classes</code></td><td><code>True</code> if the model emits <code>logits</code></td></tr>
-            <tr><td><code>.class_names</code></td><td>names embedded in ONNX metadata, or <code>None</code></td></tr>
+            <tr><td><code>.has_presence</code></td><td><code>True</code> if the model emits a <code>presence</code> output</td></tr>
             <tr><td><code>.input_name .output_names .session</code></td><td>the underlying ORT session details</td></tr>
           </tbody>
         </table>
@@ -180,7 +181,7 @@ det.detect_uint8(Image.open("frame.png"))   <span class="c"># (54, 85, 201, 201)
         <table>
           <thead><tr><th>Function</th><th>Returns</th></tr></thead>
           <tbody>
-            <tr><td><code>detect(image_path, model_path=None, input_size=480)</code></td><td>the detection dict (norm/pixel/uint8 box, image size, model; presence fields for a class head)</td></tr>
+            <tr><td><code>detect(image_path, model_path=None, input_size=480)</code></td><td>the detection dict (norm/pixel/uint8 box, image size, model; <code>present</code>/<code>score</code> for a presence head)</td></tr>
             <tr><td><code>detect_bytes(data, model_path=None, input_size=480)</code></td><td>same, from raw image bytes (HTTP body)</td></tr>
             <tr><td><code>model_info(model_path=None, input_size=480)</code></td><td>resolved model, input size, input name, providers</td></tr>
             <tr><td><code>benchmark(model_path=None, input_size=480, n=100)</code></td><td>fps on a synthetic frame</td></tr>
@@ -212,31 +213,31 @@ det.detect_uint8(Image.open("frame.png"))   <span class="c"># (54, 85, 201, 201)
         <h2>tensor_factory_train — model + training</h2>
         <p>Needs the <code>train</code> extra (<code>torch</code>).</p>
         <h3>TinyDetector</h3>
-        <div class="sig">TinyDetector(width=16, num_classes=0, learn_gain=True)</div>
+        <div class="sig">TinyDetector(width=16, presence=False, learn_gain=True)</div>
         <p>
           Four stride-2 conv blocks → a per-edge heatmap → marginal soft-argmax → normalized
-          <code>xyxy</code>. With <code>num_classes &gt; 0</code> a global-pooled linear head rides
-          alongside, so <code>forward</code> returns <code>(box, logits)</code>; otherwise just the
-          box. <code>learn_gain</code> exposes the learnable soft-argmax inverse-temperature. See
+          <code>xyxy</code>. With <code>presence=True</code> a single global-pooled objectness
+          logit head rides alongside, so <code>forward</code> returns <code>(box, presence)</code>;
+          otherwise just the box. <code>learn_gain</code> exposes the learnable soft-argmax inverse-temperature. See
           <a class="inline" href="architecture.html#model">Internals &rsaquo; the model</a>.
         </p>
         <div class="sig">soft_argmax_xyxy(heat, gain=1.0) <span class="ret"># (B,4,H,W) -&gt; (B,4) — unit-testable in isolation</span></div>
 
         <h3>fit</h3>
         <div class="sig">fit(data_dir, out_path, *, epochs=10, batch=16, lr=1e-3, size=480, width=16,
-    device=None, classify=False, val_frac=0.0, seed=0, box_weight=1.0,
-    cls_weight=1.0, augment=False, weight_decay=0.0, require_review=True,
+    device=None, presence=False, val_frac=0.0, seed=0, box_weight=1.0,
+    presence_weight=1.0, augment=False, weight_decay=0.0, require_review=True,
     negatives=None, learn_gain=True) <span class="ret">-&gt; Path</span></div>
         <p>
           Trains on <code>&lt;data_dir&gt;/annotations.coco.json</code> + images and exports an int8
           ONNX. <code>require_review</code> (default) trains only approved annotations and refuses an
-          all-pending dataset; <code>negatives</code> adds the <code>background</code> class and
-          presence head; with <code>val_frac</code> the best-scoring checkpoint is exported.
+          all-pending dataset; <code>negatives</code> turns the objectness head on and trains it
+          toward <em>absent</em> (no class); with <code>val_frac</code> the best-scoring checkpoint is exported.
         </p>
 
         <h3>export_onnx</h3>
-        <div class="sig">export_onnx(model, out_path, *, size, quantize=True, class_names=None) <span class="ret">-&gt; Path</span></div>
-        <p>Exports on CPU (opset 17), then onnxruntime dynamic-quantizes weights to <code>QUInt8</code>. <code>class_names</code> are embedded in the file's metadata so the runtime is self-describing.</p>
+        <div class="sig">export_onnx(model, out_path, *, size, quantize=True) <span class="ret">-&gt; Path</span></div>
+        <p>Exports on CPU (opset 17), then onnxruntime dynamic-quantizes weights to <code>QUInt8</code>. Output names are fixed — <code>image</code> in, <code>box</code> (and <code>presence</code> for a presence-head model) out — so the runtime reads each by name regardless of graph order.</p>
 
         <h3>data loaders</h3>
         <table>

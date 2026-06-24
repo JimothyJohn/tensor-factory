@@ -66,9 +66,13 @@ def test_model_info(server):
 def test_detect_returns_box_and_presence(server):
     status, body = _post(f"{server}/detect", _png_bytes())
     assert status == 200
-    assert "box_norm" in body and len(body["uint8"]) == 4
-    # Default bundled model has a presence head.
+    # Default bundled model has a presence head: present/score always set, box or null.
     assert isinstance(body["present"], bool)
+    assert 0.0 <= body["score"] <= 1.0
+    if body["present"]:
+        assert body["box_norm"] is not None and len(body["uint8"]) == 4
+    else:
+        assert body["box_norm"] is None
 
 
 @pytest.mark.unit

@@ -23,10 +23,12 @@
         <nav class="nav">
           <a href="getting-started.html">Start</a>
           <a href="pipeline.html" class="here">Pipeline</a>
+          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="cli.html">CLI</a>
           <a href="api.html">API</a>
           <a href="architecture.html">Internals</a>
-          <a href="demo.html">Demo</a>
+          <span class="nav-sep" aria-hidden="true"></span>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
@@ -100,16 +102,14 @@
         <p>That writes <code>data/images/</code>, <code>data/annotations.coco.json</code>, and a <code>data/label_studio.json</code> of pre-annotations. With <code>--no-label</code> it skips auto-labeling; <code>--skip-errors</code> logs and skips per-image failures instead of aborting a long run.</p>
         <p>
           The <code>mock</code> backend's boxes are exact synthetic ground truth, so they are
-          marked <code>approved</code> on creation and train without review. That is the fastest
-          way to exercise the whole pipeline end-to-end with no API key.
+          marked <code>approved</code> on creation and train without review — the fastest way to
+          exercise the whole pipeline with no API key.
         </p>
-        <h3>Generation scripts</h3>
-        <p>The helicoils example carries three batch scripts under <code>packages/tensor-factory-synth/scripts/</code> that wrap Nano Banana for application-specific data:</p>
-        <ul>
-          <li><code>gen_samples.py</code> — QC-inspection samples across part states/angles, plus a <code>manifest.json</code>.</li>
-          <li><code>build_ds.py &lt;out&gt; &lt;n&gt; &lt;reference&gt;</code> — a real photoreal dataset (generate → GroundingDINO label → COCO). An optional reference photo conditions every generation for application-matched realism.</li>
-          <li><code>gen_negatives.py</code> — machined-part <em>negatives</em> (holes/features, no helicoil) for the presence head.</li>
-        </ul>
+        <p>
+          For application-matched data, the helicoils example ships batch scripts that condition
+          generation on a real part photo (and synthesize negatives). See
+          <a class="inline" href="cli.html#synth">CLI &rsaquo; batch scripts</a>.
+        </p>
       </section>
 
       <section id="autolabel">
@@ -183,9 +183,9 @@ uv run tensor-factory-label pull --project &lt;id&gt; --out data/annotations.coc
   --n 110 --out examples/helicoils/images/negatives_pool</pre>
         <p>
           Negatives carry no box and are trainable by construction (a known absence — no review
-          gate). At training, <code>--negatives DIR</code> adds a trailing <code>background</code>
-          class, masks the box loss for box-less images, and turns on the presence head. The box
-          output contract is unchanged.
+          gate). At training, <code>--negatives DIR</code> turns on the presence head and trains its
+          objectness toward <em>absent</em> (no class), masking the box loss for box-less images. The
+          box output contract is unchanged.
         </p>
       </section>
 
@@ -196,15 +196,17 @@ uv run tensor-factory-label pull --project &lt;id&gt; --out data/annotations.coc
   --epochs 45 --device mps \
   --negatives examples/helicoils/images/negatives_pool \
   --allow-unreviewed</pre>
-        <p>What happens under the hood:</p>
+        <p>The essentials:</p>
         <ul>
-          <li><strong>Only approved annotations train</strong> by default; an all-pending dataset is refused with guidance. <code>--allow-unreviewed</code> overrides this.</li>
-          <li><strong>The model</strong> is a tiny soft-argmax CNN — four stride-2 conv blocks, a per-edge heatmap, ~16-channel width. See <a class="inline" href="architecture.html#model">the model</a>.</li>
-          <li><strong>Training resolves device cuda → mps → cpu</strong>; export always runs on CPU, then onnxruntime dynamic quantization produces the uint8-weight model.</li>
-          <li><strong>With <code>--val-frac</code></strong> a split is held out and the best-scoring checkpoint is exported — not whatever the last (possibly overfit) epoch produced.</li>
-          <li><strong>Class names</strong> are embedded in the ONNX metadata, so the model is self-describing — the runtime maps a class id to a name (and tells <em>present</em> from <em>background</em>) with no hard-coded ordering.</li>
+          <li><strong>Only approved annotations train</strong> by default; an all-pending dataset is refused. <code>--allow-unreviewed</code> overrides it.</li>
+          <li><strong>Device resolves cuda → mps → cpu</strong>; export runs on CPU, then quantizes weights to int8.</li>
+          <li><strong>With <code>--val-frac</code></strong> the best-scoring checkpoint is exported — not the last, possibly-overfit epoch.</li>
         </ul>
-        <p>See <a class="inline" href="cli.html#train">CLI &rsaquo; train</a> for every flag (width, learning rate, augmentation, the soft-argmax gain, class head).</p>
+        <p>
+          See <a class="inline" href="cli.html#train">CLI &rsaquo; train</a> for every flag, and
+          <a class="inline" href="architecture.html#model">Internals &rsaquo; the model</a> for how the
+          soft-argmax detector, its learnable gain, and the int8 export actually work.
+        </p>
       </section>
 
       <section id="run">

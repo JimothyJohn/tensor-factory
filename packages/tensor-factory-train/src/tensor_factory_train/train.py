@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import
 
 from tensor_factory.review import review_summary
 
-from .data import load_coco_boxes, load_coco_labeled, load_negatives
+from .data import load_coco_boxes, load_negatives
 from .model import TinyDetector
 
 
@@ -53,32 +53,30 @@ def _flip_box(
 
 
 class _BoxDataset(Dataset):
-    """Yields ``(image, box)`` for box-only training, or ``(image, box, label, has_box)``
-    when ``items`` carry a class id (3-tuples ``(path, box | None, label)``). One dataset,
-    both heads.
+    """Yields ``(image, box)`` for box-only training, or ``(image, box, has_box)`` when
+    ``presence`` is set. Items are always ``(path, box | None)``. One dataset, both heads.
 
-    A negative (background) item has ``box is None``: the image still trains the class
-    head, but ``has_box == 0`` masks it out of the box-regression loss -- a no-object frame
-    has no box to fit. ``augment`` adds random horizontal/vertical flips (image and box
-    transformed together; a box-less image just flips the pixels).
+    A negative (no-object) item has ``box is None``: the image still trains the presence
+    head toward *absent* (objectness target 0), but ``has_box == 0`` doubles as the mask
+    that keeps it out of the box-regression loss -- a no-object frame has no box to fit.
+    For a positive, ``has_box == 1`` is both the box mask and the objectness target.
+    ``augment`` adds random horizontal/vertical flips (image and box transformed together;
+    a box-less image just flips the pixels).
     """
 
     def __init__(
-        self, items: list, size: int, *, labeled: bool = False, augment: bool = False
+        self, items: list, size: int, *, presence: bool = False, augment: bool = False
     ) -> None:
         self.items = items
         self.size = size
-        self.labeled = labeled
+        self.presence = presence
         self.augment = augment
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, index: int):  # noqa: ANN201
-        if self.labeled:
-            path, box, label = self.items[index]
-        else:
-            path, box = self.items[index]
+        path, box = self.items[index]
         x = _load_chw(path, self.size)
         has_box = box is not None
         coords = (box.x1, box.y1, box.x2, box.y2) if has_box else (0.0, 0.0, 0.0, 0.0)
@@ -92,27 +90,10 @@ class _BoxDataset(Dataset):
                 if has_box:
                     coords = _flip_box(coords, horizontal=False)
         y = torch.tensor(coords, dtype=torch.float32)
-        if self.labeled:
-            return (
-                x,
-                y,
-                torch.tensor(label, dtype=torch.long),
-                torch.tensor(float(has_box), dtype=torch.float32),
-            )
+        if self.presence:
+            # has_box is both the objectness target and the box-loss mask.
+            return x, y, torch.tensor(float(has_box), dtype=torch.float32)
         return x, y
-
-
-def _embed_class_names(path: Path, names: list[str]) -> None:
-    """Record class names in the ONNX file's metadata so the runtime is self-describing.
-
-    Lets inference map a class id to a name -- and tell *present* from *background* --
-    without hard-coding the training-time class ordering on the edge.
-    """
-    import onnx
-
-    model = onnx.load(str(path))
-    model.metadata_props.add(key="class_names", value=json.dumps(names))
-    onnx.save(model, str(path))
 
 
 def export_onnx(
@@ -121,23 +102,22 @@ def export_onnx(
     *,
     size: int,
     quantize: bool = True,
-    class_names: list[str] | None = None,
 ) -> Path:
     """Export to ONNX on CPU, then dynamic-quantize weights to uint8.
 
-    ``class_names`` (when the model has a class head) is embedded in the final file's
-    metadata so the runtime can resolve class ids to names.
+    A presence-head model makes ``forward`` return ``(box, presence)``; both are exported
+    and named so the runtime reads each by name regardless of graph order. The output names
+    are the whole contract -- ``presence`` is what tells the runtime the model can say
+    *absent*.
     """
     out = Path(out_path)
     model = model.to("cpu").eval()
     dummy = torch.zeros(1, 3, size, size)
     fp32 = out.with_suffix(".fp32.onnx") if quantize else out
 
-    # A class head makes forward return (box, logits): export both, name them so the
-    # runtime can read each by name regardless of graph order.
     with torch.no_grad():
         multi = isinstance(model(dummy), tuple)
-    output_names = ["box", "logits"] if multi else ["box"]
+    output_names = ["box", "presence"] if multi else ["box"]
     dynamic_axes = {name: {0: "batch"} for name in ["image", *output_names]}
     torch.onnx.export(
         model,
@@ -155,8 +135,6 @@ def export_onnx(
         from onnxruntime.quantization import QuantType, quantize_dynamic
 
         quantize_dynamic(str(fp32), str(out), weight_type=QuantType.QUInt8)
-    if class_names:
-        _embed_class_names(out, class_names)
     return out
 
 
@@ -169,8 +147,8 @@ def _split(items: list, val_frac: float, seed: int) -> tuple[list, list]:
     return [items[i] for i in idx[n_val:]], [items[i] for i in idx[:n_val]]
 
 
-def _val_metrics(model, val_items, size, dev, *, classify) -> tuple[float, float | None]:  # noqa: ANN001
-    """Held-out (median center error px, class accuracy or None) on ``val_items``."""
+def _val_metrics(model, val_items, size, dev, *, presence) -> tuple[float, float | None]:  # noqa: ANN001
+    """Held-out (median center error px, presence accuracy or None) on ``val_items``."""
     model.eval()
     errs: list[float] = []
     correct = 0
@@ -178,15 +156,17 @@ def _val_metrics(model, val_items, size, dev, *, classify) -> tuple[float, float
         for item in val_items:
             box = item[1]
             out = model(_load_chw(item[0], size).unsqueeze(0).to(dev))
-            # Box error only where there is a box -- negatives (background) have none.
+            # Box error only where there is a box -- negatives have none.
             if box is not None:
                 pb = (out[0] if isinstance(out, tuple) else out)[0].cpu().numpy()
                 pcx, pcy = (pb[0] + pb[2]) / 2, (pb[1] + pb[3]) / 2
                 gcx, gcy = (box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2
                 errs.append(((pcx - gcx) ** 2 + (pcy - gcy) ** 2) ** 0.5 * size)
-            if classify:
-                correct += int(out[1][0].argmax().item() == item[2])
-    acc = correct / len(val_items) if classify else None
+            if presence:
+                # objectness logit >= 0 <=> sigmoid >= 0.5 <=> predicted present.
+                pred_present = float(out[1][0].item()) >= 0.0
+                correct += int(pred_present == (box is not None))
+    acc = correct / len(val_items) if presence else None
     model.train()
     # No positive in the val split -> no box error to report (0 penalty; acc still leads).
     return (statistics.median(errs) if errs else 0.0), acc
@@ -202,11 +182,11 @@ def fit(
     size: int = 480,
     width: int = 16,
     device: str | None = None,
-    classify: bool = False,
+    presence: bool = False,
     val_frac: float = 0.0,
     seed: int = 0,
     box_weight: float = 1.0,
-    cls_weight: float = 1.0,
+    presence_weight: float = 1.0,
     augment: bool = False,
     weight_decay: float = 0.0,
     require_review: bool = True,
@@ -215,21 +195,22 @@ def fit(
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
-    ``classify=True`` adds the class head (categories read from the COCO file) and trains
-    box regression + cross-entropy jointly; ``box_weight``/``cls_weight`` balance the two
-    (the box loss is far smaller, so weight it up to keep the class gradient from drowning
-    it). ``augment`` adds flip augmentation. With ``val_frac`` a split is held out and the
-    **best-scoring** checkpoint (class acc, then center error) is what gets exported -- not
-    whatever the last, possibly-overfit epoch produced.
+    ``presence=True`` adds a single objectness head (YOLO-style) and trains box regression
+    + binary presence jointly; ``box_weight``/``presence_weight`` balance the two (the box
+    loss is far smaller, so weight it up to keep the presence gradient from drowning it).
+    ``augment`` adds flip augmentation. With ``val_frac`` a split is held out and the
+    **best-scoring** checkpoint (presence acc, then center error) is what gets exported --
+    not whatever the last, possibly-overfit epoch produced.
 
     With ``require_review`` (default) only human-validated annotations train; an
     all-pending dataset is refused with guidance to triage it first. ``require_review=False``
     trains on everything regardless of review state.
 
     ``negatives`` is one or more directories of raw no-object images (e.g. machined parts
-    with holes but no helicoil). They force the class head on, add a trailing ``background``
-    class, and train it to report *absent*; box loss is masked out for them. This is what
-    lets the detector say "nothing here" instead of emitting a spurious box.
+    with holes but no helicoil). They turn the presence head on and train it toward *absent*
+    (objectness 0); box loss is masked out for them. This is what lets the detector return
+    no box at all instead of emitting a spurious one. There is no class label and no
+    "background" class -- absence is just the low tail of the one objectness score.
     """
     data_dir = Path(data_dir)
     coco = data_dir / "annotations.coco.json"
@@ -242,18 +223,13 @@ def fit(
         + ("" if require_review else "  (review gate OFF: training on all)")
     )
 
-    # Negatives add a background class, so the class head is mandatory when they are used.
-    classify = classify or bool(negatives)
-    if classify:
-        items, names = load_coco_labeled(coco, data_dir, require_review=require_review)
-        if negatives:
-            bg_label = len(names)
-            names = [*names, "background"]
-            neg_paths = [p for d in negatives for p in load_negatives(d)]
-            items = [*items, *[(p, None, bg_label) for p in neg_paths]]
-            print(f"negatives: +{len(neg_paths)} background images -> class {bg_label}")
-    else:
-        items, names = load_coco_boxes(coco, data_dir, require_review=require_review), []
+    # Negatives only make sense with a presence head to point them at, so they enable it.
+    presence = presence or bool(negatives)
+    items: list = load_coco_boxes(coco, data_dir, require_review=require_review)
+    if negatives:
+        neg_paths = [p for d in negatives for p in load_negatives(d)]
+        items = [*items, *[(p, None) for p in neg_paths]]
+        print(f"negatives: +{len(neg_paths)} no-object images (objectness target 0)")
     if not items:
         if require_review and a["pending"]:
             raise ValueError(
@@ -263,7 +239,6 @@ def fit(
                 "labels deliberately."
             )
         raise ValueError(f"no annotations found under {data_dir}")
-    num_classes = len(names) if classify else 0
 
     train_items, val_items = _split(items, val_frac, seed)
     # Seed torch so weight init is reproducible run-to-run -- the split is already seeded, so
@@ -271,14 +246,14 @@ def fit(
     torch.manual_seed(seed)
     dev = resolve_device(device)
     loader = DataLoader(
-        _BoxDataset(train_items, size, labeled=classify, augment=augment),
+        _BoxDataset(train_items, size, presence=presence, augment=augment),
         batch_size=batch,
         shuffle=True,
     )
-    model = TinyDetector(width, num_classes, learn_gain=learn_gain).to(dev)
+    model = TinyDetector(width, presence=presence, learn_gain=learn_gain).to(dev)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     box_loss = nn.SmoothL1Loss()
-    cls_loss = nn.CrossEntropyLoss()
+    presence_loss = nn.BCEWithLogitsLoss()
 
     best_score = float("-inf")
     best_state: dict | None = None
@@ -287,13 +262,16 @@ def fit(
         total = 0.0
         for data in loader:
             optimizer.zero_grad()
-            if classify:
-                x, yb, yc, m = (d.to(dev) for d in (data[0], data[1], data[2], data[3]))
-                pb, logits = model(x)
+            if presence:
+                x, yb, m = (d.to(dev) for d in (data[0], data[1], data[2]))
+                pb, plogit = model(x)
                 # Box loss only over box-bearing items; negatives (mask 0) contribute none.
+                # The same mask m is the objectness target: 1 for positives, 0 for negatives.
                 mb = m.bool()
                 box_term = box_loss(pb[mb], yb[mb]) if bool(mb.any()) else pb.sum() * 0.0
-                loss = box_weight * box_term + cls_weight * cls_loss(logits, yc)
+                loss = box_weight * box_term + presence_weight * presence_loss(
+                    plogit.reshape(-1), m
+                )
             else:
                 x, yb = data[0].to(dev), data[1].to(dev)
                 loss = box_weight * box_loss(model(x), yb)
@@ -303,7 +281,7 @@ def fit(
 
         line = f"epoch {epoch + 1}/{epochs}  loss {total / len(train_items):.5f}"
         if val_items:
-            err, acc = _val_metrics(model, val_items, size, dev, classify=classify)
+            err, acc = _val_metrics(model, val_items, size, dev, presence=presence)
             # Higher is better. ``err`` is the median center error in *pixels*; normalize by
             # image size so localization trades against accuracy on a comparable [0,1] scale.
             # The old ``err / 1000`` made a 15px miss worth 0.015 -- swamped by a single
@@ -320,8 +298,8 @@ def fit(
 
     if best_state is not None:
         model.load_state_dict(best_state)
-        if classify:
-            err, acc = _val_metrics(model, val_items, size, dev, classify=classify)
-            print(f"BEST checkpoint: val err {err:.1f}px  class acc {acc:.0%}  classes={names}")
+        if presence:
+            err, acc = _val_metrics(model, val_items, size, dev, presence=presence)
+            print(f"BEST checkpoint: val err {err:.1f}px  presence acc {acc:.0%}")
     print(f"soft-argmax gain: {float(model.log_gain.exp()):.2f} (1.0 = plain softmax)")
-    return export_onnx(model, out_path, size=size, class_names=names if classify else None)
+    return export_onnx(model, out_path, size=size)
