@@ -5,11 +5,6 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 
 ## Now
 
-- [ ] **Train + promote a gain-trained v4 to the bundled MCP demo.** The soft-argmax gain
-  (below) measurably improves localization; the bundle currently ships the pre-gain
-  `helicoil-presence-v3.onnx`. Train a v4 *with* the learnable gain on `real_ds_combined` +
-  `negatives_pool`, confirm it beats v3 on a fixed held-out set, then swap it into
-  `tensor-factory-mcp/src/.../models/` as the default.
 - [ ] **Model-in-the-loop pre-annotation (gated on v4 beating GroundingDINO).** Once the
   detector's boxes are tighter than the raw GroundingDINO auto-labels (measured against the
   human-approved subset as ground truth), close the loop: use the model itself to condition
@@ -18,9 +13,10 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
   the model instead of the open-vocab detector that currently caps it. The bar to start is
   explicit: v4 median box error on the held-out approved set < the GroundingDINO labels'
   error on that same set. Until then, GroundingDINO stays the labeler.
-- [ ] **Box localization is the quality ceiling (~25 px median on real data).** The
-  soft-argmax gain helped (see below); remaining limits are (1) GroundingDINO boxes are
-  loose — they bound the whole boss, not tight on the insert — and (2) tiny-model capacity.
+- [ ] **Box localization is the quality ceiling (~20 px median on real data, down from
+  ~25).** The soft-argmax gain moved it (v4 ~20 px held-out); remaining limits are (1)
+  GroundingDINO boxes are loose — they bound the whole boss, not tight on the insert — and
+  (2) tiny-model capacity.
   Further levers: tighten the loosest labels, a wider model (`--width 24/32`), native
   1024 px. (The mock-trained model hits ~1.9 px because mock geometry is exact.)
 
@@ -29,8 +25,15 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 - [x] **Merged the Nano Banana migration** into the base branch `master` (local
   fast-forward; this repo's default branch is `master`, not `main`).
 - [x] **Promoted a real model to the bundled MCP demo.** `tensor-factory-mcp` now defaults
-  to `helicoil-presence-v3.onnx` (real data + presence head); the synthetic
-  `helicoil-mock-v1.onnx` stays bundled for the box-only path.
+  to `helicoil-presence-v4.onnx` (real data + presence head + the soft-argmax gain); the
+  synthetic `helicoil-mock-v1.onnx` stays bundled for the box-only path. (Briefly shipped
+  the pre-gain v3 earlier this session before v4 was trained.)
+- [x] **Trained + validated v4 (gain).** 80-epoch gain run on `real_ds_combined` +
+  `negatives_pool`: best val box-median **20.7 px**, presence acc **84%**, gain learned to
+  **1.39**. On v4's held-out split v4 beats the (leak-advantaged) v3 on box median **20.3 vs
+  24.7 px**. A leak-free tail check (gain vs no-gain on identical held-out, both seeds)
+  confirms the gain *shrinks* the outlier tail — >30 px miss rate 80%→41% and 79%→13%, with
+  mean/p90/max all down — so the gain doesn't trade tail for median; it improves both.
 - [x] **HTTP serving surface.** `tensor-factory-http` — a stdlib `http.server` endpoint
   (zero extra deps) wrapping the same `core` inference: `POST /detect` (raw image bytes) →
   the same JSON as the MCP tool, plus `/health` and `/model_info`. Lighter than MCP.

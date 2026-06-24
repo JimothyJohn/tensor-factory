@@ -18,10 +18,11 @@ model**. Architecture/throughput numbers hold across models; the ~1.9 px localiz
 figure is on **mock** data (exact geometry). On real photoreal data, box localization is
 ~25 px (the open quality ceiling — see [`TODO.md`](TODO.md)).
 
-- **The bundled MCP model is now `helicoil-presence-v3.onnx`** (real data + presence head,
-  88% held-out present/absent) — promoted from the synthetic `helicoil-mock-v1.onnx`, which
-  is still bundled alongside it (box-only, selectable via `model_path`). Other real-data
-  models live gitignored under `examples/helicoils/images/`.
+- **The bundled MCP model is now `helicoil-presence-v4.onnx`** (real data + presence head +
+  the soft-argmax gain; ~20 px held-out box median, presence acc 84%) — promoted from the
+  synthetic `helicoil-mock-v1.onnx`, which is still bundled alongside it (box-only,
+  selectable via `model_path`). Other real-data models live gitignored under
+  `examples/helicoils/images/`.
 - **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds

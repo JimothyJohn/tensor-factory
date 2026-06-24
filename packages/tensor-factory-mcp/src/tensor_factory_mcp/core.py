@@ -1,8 +1,8 @@
 """Detection logic behind the MCP tools -- framework-free and unit-testable.
 
 Wraps :class:`tensor_factory.inference.Detector`. The default model is the int8 ONNX bundled
-with this package (trained on synthetic data -- a working demo, not a production model).
-Detectors are cached by (model, input_size) so repeated calls reuse the ONNX session.
+with this package (a real-data detector with a presence head). Detectors are cached by
+(model, input_size) so repeated calls reuse the ONNX session.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 from tensor_factory.inference import Detector
 from tensor_factory.inference import benchmark as _benchmark
 
-DEFAULT_MODEL_NAME = "helicoil-presence-v3.onnx"
+DEFAULT_MODEL_NAME = "helicoil-presence-v4.onnx"
 DEFAULT_INPUT_SIZE = 480
 
 
