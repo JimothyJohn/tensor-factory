@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Python API — tensor-factory</title>
+<meta name="description" content="Developer reference for the tensor-factory Python API: BBox geometry, the 8-bit codec, annotation formats, the Detector, the review gate, and the training functions." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html">Start</a>
+          <a href="pipeline.html">Pipeline</a>
+          <a href="cli.html">CLI</a>
+          <a href="api.html" class="here">API</a>
+          <a href="architecture.html">Internals</a>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">Developer reference</p>
+    <h1>Python <em>API</em></h1>
+    <p class="lede">
+      The public surface of the core library and its siblings. The core (<code>tensor_factory</code>)
+      is dependency-free; inference, generation, and training are lazy-imported behind extras
+      so importing a module never pulls a heavy dependency you didn't ask for.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="core">
+        <h2>tensor_factory (core)</h2>
+        <p>Top-level exports — the dependency-free primitives:</p>
+<pre><span class="k">from</span> tensor_factory <span class="k">import</span> BBox, encode_uint8, decode_uint8, max_error_px</pre>
+      </section>
+
+      <section id="bbox">
+        <h2>BBox</h2>
+        <p>
+          The canonical bounding box: axis-aligned, normalized <code>xyxy</code> in
+          <code>[0, 1]</code>, top-left origin. <strong>Immutable</strong> (slotted, no
+          <code>__setattr__</code>), hashable, and resolution-independent — one annotation flows
+          unchanged from 480 px training to whatever the camera feeds at inference.
+        </p>
+        <div class="sig">BBox(x1, y1, x2, y2)  <span class="ret"># validates range + order; raises on degenerate</span></div>
+        <p>Construct directly only with values you know are valid; otherwise use the constructors that repair input:</p>
+        <table>
+          <thead><tr><th>Constructor</th><th>From</th></tr></thead>
+          <tbody>
+            <tr><td><code>BBox.clamped(x1, y1, x2, y2)</code></td><td>normalized coords — clamps to <code>[0,1]</code>, fixes ordering</td></tr>
+            <tr><td><code>BBox.from_cxcywh(cx, cy, w, h)</code></td><td>normalized center + size</td></tr>
+            <tr><td><code>BBox.from_pixels(x1, y1, x2, y2, *, width, height)</code></td><td>absolute pixels</td></tr>
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Member</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>.x1 .y1 .x2 .y2</code></td><td>the four normalized coords (float)</td></tr>
+            <tr><td><code>.width .height .area</code></td><td>derived extents</td></tr>
+            <tr><td><code>.center</code></td><td><code>(cx, cy)</code></td></tr>
+            <tr><td><code>.to_cxcywh()</code></td><td><code>(cx, cy, w, h)</code></td></tr>
+            <tr><td><code>.to_pixels(*, width, height)</code></td><td>absolute integer <code>(x1, y1, x2, y2)</code></td></tr>
+            <tr><td><code>.iou(other)</code></td><td>intersection-over-union in <code>[0, 1]</code></td></tr>
+          </tbody>
+        </table>
+<pre><span class="k">from</span> tensor_factory <span class="k">import</span> BBox
+
+b = BBox(0.1, 0.1, 0.9, 0.9)
+b.to_pixels(width=480, height=480)   <span class="c"># (48, 48, 432, 432)</span>
+b.iou(BBox(0.0, 0.0, 0.5, 0.5))      <span class="c"># overlap ratio</span></pre>
+      </section>
+
+      <section id="codec">
+        <h2>codec — the 8-bit contract</h2>
+        <p>A detection is four <code>uint8</code> values. These convert a <code>BBox</code> to and from that form.</p>
+        <div class="sig">encode_uint8(box: BBox) <span class="ret">-&gt; tuple[int, int, int, int]</span></div>
+        <div class="sig">decode_uint8(values: Sequence[int]) <span class="ret">-&gt; BBox</span>  <span class="ret"># repairs order, clamps</span></div>
+        <div class="sig">max_error_px(image_size: int) <span class="ret">-&gt; float</span>  <span class="ret"># worst-case round-trip error</span></div>
+<pre><span class="k">from</span> tensor_factory <span class="k">import</span> encode_uint8, decode_uint8, max_error_px
+
+encode_uint8(BBox(0.1, 0.1, 0.9, 0.9))  <span class="c"># (26, 26, 230, 230)</span>
+max_error_px(480)                        <span class="c"># ~0.94 px (under the 3px budget)</span></pre>
+        <p>Why four bytes is enough lives in <a class="inline" href="architecture.html#contract">Internals &rsaquo; the contract</a>.</p>
+      </section>
+
+      <section id="formats">
+        <h2>formats — annotation conversion</h2>
+        <p><code>tensor_factory.formats</code> converts the canonical <code>BBox</code> to/from COCO, YOLO, and Pascal VOC. Every exporter has a matching importer, so a box survives a round-trip (COCO/YOLO are lossless float; VOC rounds to integer pixels).</p>
+        <table>
+          <thead><tr><th>To</th><th>From</th><th>Form</th></tr></thead>
+          <tbody>
+            <tr><td><code>to_coco_bbox(box, *, width, height)</code></td><td><code>from_coco_bbox(bbox, *, width, height)</code></td><td>COCO <code>[x, y, w, h]</code> abs px</td></tr>
+            <tr><td><code>to_yolo(box)</code></td><td><code>from_yolo(cx, cy, w, h)</code></td><td>YOLO normalized <code>(cx, cy, w, h)</code></td></tr>
+            <tr><td><code>to_voc_box(box, *, width, height)</code></td><td><code>from_voc_box(voc, *, width, height)</code></td><td>VOC <code>xmin/ymin/xmax/ymax</code> int px</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="inference">
+        <h2>inference — Detector</h2>
+        <p>
+          CPU inference via onnxruntime, behind the <code>infer</code> extra (lazy-imported, so the
+          pure-Python core stays dependency-free). The fixed contract: input <code>image</code> is
+          <code>(1, 3, S, S)</code> float32 in <code>[0, 1]</code> (CHW, RGB); output <code>box</code>
+          is <code>(1, 4)</code> normalized <code>xyxy</code>; a class-head model adds a
+          <code>logits</code> output.
+        </p>
+        <div class="sig">Detector(model_path, *, input_size=480, providers=None)</div>
+        <table>
+          <thead><tr><th>Method / attr</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>.detect_box(image)</code></td><td>a <code>BBox</code></td></tr>
+            <tr><td><code>.detect_uint8(image)</code></td><td>the four-<code>uint8</code> tuple</td></tr>
+            <tr><td><code>.detect(image)</code></td><td><code>(BBox, class_id, score)</code> — needs a class head, else raises</td></tr>
+            <tr><td><code>.preprocess(image)</code></td><td>the <code>(1,3,S,S)</code> float32 input array</td></tr>
+            <tr><td><code>.has_classes</code></td><td><code>True</code> if the model emits <code>logits</code></td></tr>
+            <tr><td><code>.class_names</code></td><td>names embedded in ONNX metadata, or <code>None</code></td></tr>
+            <tr><td><code>.input_name .output_names .session</code></td><td>the underlying ORT session details</td></tr>
+          </tbody>
+        </table>
+        <div class="sig">benchmark(detector, image, *, n=100, warmup=5) <span class="ret">-&gt; float</span>  <span class="ret"># mean fps</span></div>
+<pre><span class="k">from</span> PIL <span class="k">import</span> Image
+<span class="k">from</span> tensor_factory.inference <span class="k">import</span> Detector
+
+det = Detector("model.onnx", input_size=480)
+box = det.detect_box(Image.open("frame.png"))
+det.detect_uint8(Image.open("frame.png"))   <span class="c"># (54, 85, 201, 201)</span></pre>
+      </section>
+
+      <section id="review">
+        <h2>review — the validation gate</h2>
+        <p>
+          <code>tensor_factory.review</code> is the single source of truth for which labels may
+          train. Each COCO annotation carries <code>review</code> (a triage decision) and
+          <code>source</code> (provenance). <strong>Only <code>approved</code> is trainable</strong>;
+          a missing review key normalizes to <code>pending</code> — untrusted by default.
+        </p>
+        <table>
+          <thead><tr><th>States</th><th>Sources</th></tr></thead>
+          <tbody>
+            <tr><td><code>PENDING</code> · <code>APPROVED</code> · <code>REJECTED</code></td><td><code>GROUNDINGDINO</code> · <code>HUMAN</code> · <code>SYNTHETIC_GT</code></td></tr>
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Function</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>normalize(review)</code></td><td>a known state (unknown/None → <code>PENDING</code>)</td></tr>
+            <tr><td><code>is_trainable(review)</code></td><td><code>True</code> iff <code>approved</code></td></tr>
+            <tr><td><code>review_summary(coco)</code></td><td>image + annotation counts per state, plus <code>trainable</code></td></tr>
+          </tbody>
+        </table>
+        <p>See <a class="inline" href="architecture.html#review">Internals &rsaquo; the review gate</a> for the rationale.</p>
+      </section>
+
+      <section id="serving">
+        <h2>tensor_factory_mcp.core — serving logic</h2>
+        <p>Framework-free detection logic the MCP tools and the HTTP server both wrap, so all surfaces return byte-identical JSON. Detectors are cached by <code>(model, input_size)</code>.</p>
+        <table>
+          <thead><tr><th>Function</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>detect(image_path, model_path=None, input_size=480)</code></td><td>the detection dict (norm/pixel/uint8 box, image size, model; presence fields for a class head)</td></tr>
+            <tr><td><code>detect_bytes(data, model_path=None, input_size=480)</code></td><td>same, from raw image bytes (HTTP body)</td></tr>
+            <tr><td><code>model_info(model_path=None, input_size=480)</code></td><td>resolved model, input size, input name, providers</td></tr>
+            <tr><td><code>benchmark(model_path=None, input_size=480, n=100)</code></td><td>fps on a synthetic frame</td></tr>
+            <tr><td><code>resolve_model(model_path)</code></td><td>absolute model path (falls back to the bundled default)</td></tr>
+          </tbody>
+        </table>
+        <p>The HTTP server (<code>tensor_factory_mcp.http_server</code>) exposes <code>make_server(host, port, …)</code> and <code>serve(…)</code> for embedding the endpoint in your own process.</p>
+      </section>
+
+      <section id="synth">
+        <h2>tensor_factory_synth — generation + labeling</h2>
+        <p>Top-level exports (generation needs the <code>gemini</code> extra; the labeler needs <code>gpu</code>):</p>
+        <table>
+          <thead><tr><th>Symbol</th><th>What</th></tr></thead>
+          <tbody>
+            <tr><td><code>Generator</code> (Protocol)</td><td><code>generate(prompt, seed, *, size=480) -&gt; GeneratedSample</code></td></tr>
+            <tr><td><code>MockGenerator</code></td><td>deterministic, torch-free; exact ground-truth boxes</td></tr>
+            <tr><td><code>NanoBananaGenerator</code></td><td>Gemini <code>gemini-2.5-flash-image</code>; optional <code>reference</code> image</td></tr>
+            <tr><td><code>AutoLabeler</code> (Protocol)</td><td><code>label(image, features) -&gt; list[Detection]</code></td></tr>
+            <tr><td><code>GroundingDinoAutoLabeler</code></td><td>open-vocabulary labeler; resolves device cuda → mps → cpu</td></tr>
+            <tr><td><code>GeneratedSample</code>, <code>Detection</code></td><td>dataclasses carrying provenance + review state</td></tr>
+            <tr><td><code>synth_dataset(generator, prompt, features, *, n, out_dir, …)</code></td><td>end-to-end: generate → label → write COCO</td></tr>
+            <tr><td><code>resolve_device(prefer=None)</code>, <code>enable_mps_fallback()</code></td><td>device helpers</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="train">
+        <h2>tensor_factory_train — model + training</h2>
+        <p>Needs the <code>train</code> extra (<code>torch</code>).</p>
+        <h3>TinyDetector</h3>
+        <div class="sig">TinyDetector(width=16, num_classes=0, learn_gain=True)</div>
+        <p>
+          Four stride-2 conv blocks → a per-edge heatmap → marginal soft-argmax → normalized
+          <code>xyxy</code>. With <code>num_classes &gt; 0</code> a global-pooled linear head rides
+          alongside, so <code>forward</code> returns <code>(box, logits)</code>; otherwise just the
+          box. <code>learn_gain</code> exposes the learnable soft-argmax inverse-temperature. See
+          <a class="inline" href="architecture.html#model">Internals &rsaquo; the model</a>.
+        </p>
+        <div class="sig">soft_argmax_xyxy(heat, gain=1.0) <span class="ret"># (B,4,H,W) -&gt; (B,4) — unit-testable in isolation</span></div>
+
+        <h3>fit</h3>
+        <div class="sig">fit(data_dir, out_path, *, epochs=10, batch=16, lr=1e-3, size=480, width=16,
+    device=None, classify=False, val_frac=0.0, seed=0, box_weight=1.0,
+    cls_weight=1.0, augment=False, weight_decay=0.0, require_review=True,
+    negatives=None, learn_gain=True) <span class="ret">-&gt; Path</span></div>
+        <p>
+          Trains on <code>&lt;data_dir&gt;/annotations.coco.json</code> + images and exports an int8
+          ONNX. <code>require_review</code> (default) trains only approved annotations and refuses an
+          all-pending dataset; <code>negatives</code> adds the <code>background</code> class and
+          presence head; with <code>val_frac</code> the best-scoring checkpoint is exported.
+        </p>
+
+        <h3>export_onnx</h3>
+        <div class="sig">export_onnx(model, out_path, *, size, quantize=True, class_names=None) <span class="ret">-&gt; Path</span></div>
+        <p>Exports on CPU (opset 17), then onnxruntime dynamic-quantizes weights to <code>QUInt8</code>. <code>class_names</code> are embedded in the file's metadata so the runtime is self-describing.</p>
+
+        <h3>data loaders</h3>
+        <table>
+          <thead><tr><th>Function</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>load_coco_boxes(coco, root, *, require_review=True)</code></td><td><code>list[(path, BBox)]</code></td></tr>
+            <tr><td><code>load_coco_labeled(coco, root, *, require_review=True)</code></td><td><code>(list[(path, BBox, label)], names)</code></td></tr>
+            <tr><td><code>load_negatives(images_dir)</code></td><td><code>list[Path]</code> (no review gate — a known absence)</td></tr>
+            <tr><td><code>resolve_device(prefer=None)</code></td><td>training device (cuda → mps → cpu)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="label">
+        <h2>tensor_factory_label — Label Studio</h2>
+        <table>
+          <thead><tr><th>Symbol</th><th>What</th></tr></thead>
+          <tbody>
+            <tr><td><code>LabelStudioClient(url, token, *, timeout=60.0, transport=None)</code></td><td>REST client: <code>create_project</code>, <code>import_tasks</code>, <code>export_json</code></td></tr>
+            <tr><td><code>bbox_config(labels=("helicoil",))</code></td><td>RectangleLabels config XML</td></tr>
+            <tr><td><code>coco_to_tasks(coco, image_url)</code></td><td>COCO → Label Studio tasks with predictions</td></tr>
+            <tr><td><code>ls_export_to_coco(export, *, image_field="image")</code></td><td>LS export → COCO (stamps <code>approved</code>/<code>human</code>)</td></tr>
+            <tr><td><code>http_image_url(base_url)</code>, <code>local_storage_url(prefix=…)</code></td><td>URL factories for the round-trip</td></tr>
+          </tbody>
+        </table>
+        <div class="note">
+          <span class="tag">Box coordinate note</span>
+          <p>COCO boxes are normalized <code>[0, 1]</code>; Label Studio boxes are percentages <code>0–100</code>. The converters handle the scaling, and image file names are preserved through the round-trip via the URL factories.</p>
+        </div>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#core">core exports</a>
+      <a href="#bbox">BBox</a>
+      <a href="#codec">codec</a>
+      <a href="#formats">formats</a>
+      <a href="#inference">Detector</a>
+      <a href="#review">review</a>
+      <a href="#serving">serving core</a>
+      <a href="#synth">synth</a>
+      <a href="#train">train</a>
+      <a href="#label">label</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="cli.html"><span class="lbl">Prev</span>&larr; CLI reference</a>
+      <a class="nxt" href="architecture.html"><span class="lbl">Next</span>Internals &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>

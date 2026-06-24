@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The pipeline — tensor-factory</title>
+<meta name="description" content="The end-to-end tensor-factory workflow: synthesize a labeled dataset, auto-label, human-review, train a tiny int8 model, and run it on CPU." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html">Start</a>
+          <a href="pipeline.html" class="here">Pipeline</a>
+          <a href="cli.html">CLI</a>
+          <a href="api.html">API</a>
+          <a href="architecture.html">Internals</a>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">User guide</p>
+    <h1>The <em>pipeline</em></h1>
+    <p class="lede">
+      A prompt becomes a tiny detector in five steps: synthesize a labeled dataset,
+      auto-label it, validate the labels, train a tiny int8 model, and run it on CPU. This
+      is the factory — point it at a new object and turn the crank.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>The flow, and which package owns each step:</p>
+        <table>
+          <thead><tr><th>Step</th><th>Package</th><th>Produces</th></tr></thead>
+          <tbody>
+            <tr><td>1 · Synthesize</td><td><code>tensor-factory-synth</code></td><td>generated images</td></tr>
+            <tr><td>2 · Auto-label</td><td><code>tensor-factory-synth</code></td><td>COCO with <code>review=pending</code> boxes</td></tr>
+            <tr><td>3 · Review</td><td><code>tensor-factory-label</code></td><td>COCO with <code>review=approved</code> boxes</td></tr>
+            <tr><td>4 · Train</td><td><code>tensor-factory-train</code></td><td>int8 ONNX model</td></tr>
+            <tr><td>5 · Run</td><td><code>tensor-factory</code> / <code>-mcp</code></td><td>detections on CPU</td></tr>
+          </tbody>
+        </table>
+        <p>
+          The connective tissue is a <strong>COCO file</strong> (<code>annotations.coco.json</code>)
+          carrying two extra keys per annotation — <code>review</code> and <code>source</code> —
+          that gate which labels are allowed to train. That gate is the spine of the whole
+          pipeline; <a class="inline" href="#review">step&nbsp;3</a> and
+          <a class="inline" href="architecture.html#review">Internals &rsaquo; the review gate</a> cover it.
+        </p>
+        <div class="note">
+          <span class="tag">Which extras</span>
+          <p>
+            Generation needs the <code>gemini</code> extra (a hosted API, no GPU); auto-labeling
+            and training need a GPU-shaped extra (<code>gpu</code> / <code>train</code>). The
+            <code>mock</code> backend needs neither and runs anywhere — ideal for trying the flow.
+            See <a class="inline" href="cli.html#extras">CLI &rsaquo; extras</a>.
+          </p>
+        </div>
+      </section>
+
+      <section id="synthesize">
+        <h2>1 · Synthesize</h2>
+        <p>
+          Generate images from a text prompt. Two backends: <code>mock</code> (deterministic,
+          torch-free, runs anywhere — renders seeded coil images with <em>exact</em> ground-truth
+          boxes) and <code>gemini</code> (Nano Banana, <code>gemini-2.5-flash-image</code> — a
+          hosted API call, no local GPU, reads <code>GEMINI_API_KEY</code>).
+        </p>
+        <p>Iterate on a prompt first with a contact sheet:</p>
+<pre>uv run tensor-factory-synth --backend gemini sample \
+  --prompt "extreme macro of a helicoil in machined aluminum" \
+  --n 9 --cols 3 --out samples.png</pre>
+        <p>Then generate and (with the gemini backend) auto-label a full dataset in one shot:</p>
+<pre>uv run tensor-factory-synth --backend gemini dataset \
+  --prompt "extreme macro of a helicoil in machined aluminum" \
+  --features helicoil --n 500 --out data/</pre>
+        <p>That writes <code>data/images/</code>, <code>data/annotations.coco.json</code>, and a <code>data/label_studio.json</code> of pre-annotations. With <code>--no-label</code> it skips auto-labeling; <code>--skip-errors</code> logs and skips per-image failures instead of aborting a long run.</p>
+        <p>
+          The <code>mock</code> backend's boxes are exact synthetic ground truth, so they are
+          marked <code>approved</code> on creation and train without review. That is the fastest
+          way to exercise the whole pipeline end-to-end with no API key.
+        </p>
+        <h3>Generation scripts</h3>
+        <p>The helicoils example carries three batch scripts under <code>packages/tensor-factory-synth/scripts/</code> that wrap Nano Banana for application-specific data:</p>
+        <ul>
+          <li><code>gen_samples.py</code> — QC-inspection samples across part states/angles, plus a <code>manifest.json</code>.</li>
+          <li><code>build_ds.py &lt;out&gt; &lt;n&gt; &lt;reference&gt;</code> — a real photoreal dataset (generate → GroundingDINO label → COCO). An optional reference photo conditions every generation for application-matched realism.</li>
+          <li><code>gen_negatives.py</code> — machined-part <em>negatives</em> (holes/features, no helicoil) for the presence head.</li>
+        </ul>
+      </section>
+
+      <section id="autolabel">
+        <h2>2 · Auto-label</h2>
+        <p>
+          For the gemini backend, the <code>dataset</code> command auto-labels with
+          <strong>GroundingDINO</strong> (open-vocabulary detection via <code>transformers</code>),
+          turning your <code>--features</code> into detection phrases. Each box it proposes is
+          written as <code>review=pending</code>, <code>source=groundingdino</code> — an AI guess,
+          <em>not yet trainable</em>.
+        </p>
+        <p>See what awaits review at any time:</p>
+<pre>uv run tensor-factory-synth triage --data data/
+<span class="c"># images: 500 total, ...
+# annotations: 487 total -- 0 approved, 487 pending, 0 rejected (trainable: 0)</span></pre>
+        <p>The labeler resolves its device <strong>cuda → mps → cpu</strong>, so it runs on this Mac's MPS and scales out to a CUDA box for bulk runs. It lives behind the <code>gpu</code> extra.</p>
+      </section>
+
+      <section id="review">
+        <h2>3 · Review (the human gate)</h2>
+        <p>
+          By default, AI-labeled data is not trainable until a human validates it. There are
+          two ways through the gate.
+        </p>
+
+        <h3>Path A — Label Studio round-trip</h3>
+        <p>Push the candidates (with their boxes as pre-annotations), correct them in the UI, and pull the result back. The pull stamps everything <code>review=approved</code>, <code>source=human</code> — now trainable.</p>
+<pre><span class="c"># push candidates into a new Label Studio project</span>
+uv run tensor-factory-label push --data data/ \
+  --title "helicoil v1" --image-base http://localhost:8081
+
+<span class="c"># ...correct boxes in the UI, then pull them back to COCO</span>
+uv run tensor-factory-label pull --project &lt;id&gt; --out data/annotations.coco.json</pre>
+        <p>
+          It reads <code>LABEL_STUDIO_URL</code> (default <code>http://localhost:8080</code>) and
+          <code>LABEL_STUDIO_API_KEY</code> from the environment. The helicoils example bundles
+          <code>examples/helicoils/relabel.sh [DATA_DIR]</code>, which brings up a shared Label
+          Studio plus a per-dataset image server so several datasets can be labeled
+          concurrently.
+        </p>
+
+        <h3>Path B — fast path (skip hand-labeling)</h3>
+        <p>
+          Hand-correcting every box is optional. <code>--allow-unreviewed</code> at training time
+          trains straight on the raw GroundingDINO labels. QC them by rendering a contact-sheet
+          of boxes — eyeball one image instead of clicking hundreds. Use Label Studio only when
+          you want to fix <em>specific</em> bad labels, not as a gate.
+        </p>
+        <div class="note">
+          <span class="tag">Why the gate exists</span>
+          <p>
+            Every COCO annotation carries <code>review</code> (<code>pending</code> /
+            <code>approved</code> / <code>rejected</code>) and <code>source</code>
+            (<code>groundingdino</code> / <code>human</code> / <code>synthetic_gt</code>). A
+            <em>missing</em> review key counts as pending — untrusted by default. Only
+            <code>approved</code> trains. See
+            <a class="inline" href="architecture.html#review">Internals &rsaquo; the review gate</a>.
+          </p>
+        </div>
+      </section>
+
+      <section id="negatives">
+        <h2>3b · Negatives (optional, for present/absent)</h2>
+        <p>
+          A box-only detector always emits <em>a</em> box, even on a part with no helicoil. To let
+          it report <strong>absent</strong>, synthesize negatives — machined parts with holes but
+          no insert — and add them at training time:
+        </p>
+<pre>uv run --with google-genai python \
+  packages/tensor-factory-synth/scripts/gen_negatives.py \
+  --n 110 --out examples/helicoils/images/negatives_pool</pre>
+        <p>
+          Negatives carry no box and are trainable by construction (a known absence — no review
+          gate). At training, <code>--negatives DIR</code> adds a trailing <code>background</code>
+          class, masks the box loss for box-less images, and turns on the presence head. The box
+          output contract is unchanged.
+        </p>
+      </section>
+
+      <section id="train">
+        <h2>4 · Train</h2>
+        <p>Fit the tiny detector on the COCO dataset and export an int8 ONNX model:</p>
+<pre>uv run tensor-factory-train fit --data data/ --out model.onnx \
+  --epochs 45 --device mps \
+  --negatives examples/helicoils/images/negatives_pool \
+  --allow-unreviewed</pre>
+        <p>What happens under the hood:</p>
+        <ul>
+          <li><strong>Only approved annotations train</strong> by default; an all-pending dataset is refused with guidance. <code>--allow-unreviewed</code> overrides this.</li>
+          <li><strong>The model</strong> is a tiny soft-argmax CNN — four stride-2 conv blocks, a per-edge heatmap, ~16-channel width. See <a class="inline" href="architecture.html#model">the model</a>.</li>
+          <li><strong>Training resolves device cuda → mps → cpu</strong>; export always runs on CPU, then onnxruntime dynamic quantization produces the uint8-weight model.</li>
+          <li><strong>With <code>--val-frac</code></strong> a split is held out and the best-scoring checkpoint is exported — not whatever the last (possibly overfit) epoch produced.</li>
+          <li><strong>Class names</strong> are embedded in the ONNX metadata, so the model is self-describing — the runtime maps a class id to a name (and tells <em>present</em> from <em>background</em>) with no hard-coded ordering.</li>
+        </ul>
+        <p>See <a class="inline" href="cli.html#train">CLI &rsaquo; train</a> for every flag (width, learning rate, augmentation, the soft-argmax gain, class head).</p>
+      </section>
+
+      <section id="run">
+        <h2>5 · Run</h2>
+        <p>Run the exported model on CPU from the CLI:</p>
+<pre>uv run tensor-factory detect --model model.onnx --image frame.png
+uv run tensor-factory bench  --model model.onnx</pre>
+        <p>Or serve it. A presence-head model also reports <code>present</code> / <code>class_name</code> over MCP and HTTP:</p>
+<pre>uv run tensor-factory-mcp                          <span class="c"># stdio MCP, --model defaults to bundled</span>
+uv run tensor-factory-http --model model.onnx     <span class="c"># POST raw bytes to /detect</span></pre>
+        <p>See <a class="inline" href="getting-started.html#serve">Getting started &rsaquo; serve</a> and the <a class="inline" href="cli.html">CLI reference</a>.</p>
+      </section>
+
+      <section id="newobject">
+        <h2>Pointing the factory at a new object</h2>
+        <p>The helicoils example is the template. To target something else:</p>
+        <ol>
+          <li>Write a prompt that generates your object, and pick <code>--features</code> phrases GroundingDINO can find.</li>
+          <li>Generate + auto-label a dataset (or use the mock backend to prototype).</li>
+          <li>QC the labels — contact-sheet for the fast path, Label Studio for precision.</li>
+          <li>Optionally synthesize negatives for present/absent.</li>
+          <li>Train, export, and serve. Same five packages, same commands.</li>
+        </ol>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#overview">Overview</a>
+      <a href="#synthesize">1 · Synthesize</a>
+      <a href="#autolabel">2 · Auto-label</a>
+      <a href="#review">3 · Review</a>
+      <a href="#negatives" class="sub">3b · Negatives</a>
+      <a href="#train">4 · Train</a>
+      <a href="#run">5 · Run</a>
+      <a href="#newobject">A new object</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="getting-started.html"><span class="lbl">Prev</span>&larr; Getting started</a>
+      <a class="nxt" href="cli.html"><span class="lbl">Next</span>CLI reference &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>

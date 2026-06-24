@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Internals — tensor-factory</title>
+<meta name="description" content="How tensor-factory works inside: the 8-bit detection contract, the tiny soft-argmax model and its learnable gain, int8 quantization, device resolution, the review gate, and the package layout." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html">Start</a>
+          <a href="pipeline.html">Pipeline</a>
+          <a href="cli.html">CLI</a>
+          <a href="api.html">API</a>
+          <a href="architecture.html" class="here">Internals</a>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">Developer reference</p>
+    <h1>How it <em>works</em></h1>
+    <p class="lede">
+      The design decisions behind the factory: why a detection is four bytes, how a tiny
+      soft-argmax CNN localizes sub-pixel, how it quantizes to int8, and why a human gate
+      sits between auto-labels and training.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="contract">
+        <h2>The detection contract</h2>
+        <p>
+          A detection is <strong>four <code>uint8</code> values</strong> — normalized
+          <code>xyxy</code>, one byte each. That is the entire on-the-wire output, and it is the
+          fixed boundary between training, the codec, and the edge.
+        </p>
+        <p>The arithmetic that makes one byte per coordinate enough:</p>
+        <ul>
+          <li>256 levels across <code>[0, 1]</code> → at 480 px the quantization step is <code>480 / 255 ≈ 1.88 px</code>.</li>
+          <li>Worst-case round-trip error is half a step, <code>≈ 0.94 px</code> — comfortably inside the 3 px budget.</li>
+          <li>All post-processing stays in 8-bit math: no float boxes to carry around the edge.</li>
+        </ul>
+        <p>
+          This lives in <code>tensor_factory.codec</code>; the canonical box is
+          <code>tensor_factory.geometry.BBox</code>. The model's ONNX output is a float
+          <code>(1, 4)</code> tensor; the runtime decodes it to a <code>BBox</code> and the four
+          bytes. The ~1.9 px localization figure on the landing page is the <em>mock</em>
+          (exact-geometry) number — on real photoreal data, box localization is the open quality
+          ceiling (~25 px median), tracked in <code>TODO.md</code>.
+        </p>
+      </section>
+
+      <section id="model">
+        <h2>The model</h2>
+        <p>
+          <code>TinyDetector</code> is a single-object box regressor with a soft-argmax coordinate
+          head. The backbone is four stride-2 conv blocks (conv → batchnorm → ReLU) that take the
+          480 px input down a spatial pyramid:
+        </p>
+<pre>480 -&gt; 240 -&gt; 120 -&gt; 60 -&gt; 30      <span class="c"># 4 stride-2 blocks, NO global pool</span>
+channels: 3 -&gt; c -&gt; 2c -&gt; 4c -&gt; 4c <span class="c"># c = --width (default 16)</span></pre>
+        <p>
+          There is no global pooling on the box path, so spatial information survives to a
+          <code>30 × 30</code> feature map. A <code>1×1</code> conv makes <strong>one heatmap per
+          box edge</strong> (channels <code>x1, y1, x2, y2</code>). Each heatmap is spatially
+          soft-maxed, and a <em>marginal</em> soft-argmax reads off that edge:
+        </p>
+        <ul>
+          <li><code>x1</code> from channel 0's x-marginal, <code>x2</code> from channel 2's x-marginal,</li>
+          <li><code>y1</code> from channel 1's y-marginal, <code>y2</code> from channel 3's y-marginal.</li>
+        </ul>
+        <p>
+          Every coordinate is localized sub-pixel by the same mechanism — there is no width/height
+          regression, which was the precision bottleneck. The output is normalized
+          <code>xyxy</code>, tiny enough to int8-quantize and run well above 10 fps (the helicoils
+          model: ~204 fps @ 480 px, 81 KB).
+        </p>
+
+        <h3>The soft-argmax gain</h3>
+        <p>
+          A plain softmax of a <em>diffuse or multimodal</em> heatmap has its marginal expectation
+          pulled toward 0.5 — the image centre. On clean synthetic data the peaks are already
+          sharp, so it's invisible; on ambiguous real-world features it is the dominant
+          localization error (the box regresses to the middle).
+        </p>
+        <p>
+          The fix is a <strong>learnable gain</strong> — an inverse softmax temperature, stored in
+          log-space as <code>TinyDetector.log_gain</code> so <code>gain = exp(·)</code> stays
+          positive. It scales the logits before the spatial softmax: <code>gain &gt; 1</code> sharpens
+          the distribution so the expectation tracks the true peak instead of drifting centre-ward.
+        </p>
+        <ul>
+          <li><strong>Init 0 → gain 1.0 → plain softmax</strong>, so existing checkpoints are unaffected and the optimizer is free to anneal it up.</li>
+          <li>It is <strong>one scalar parameter</strong> and exports cleanly to ONNX — no change to the box/logits output contract.</li>
+          <li><code>--freeze-gain</code> registers it as a buffer fixed at 1 (an ablation).</li>
+        </ul>
+        <div class="note">
+          <span class="tag">Measured</span>
+          <p>
+            A/B on the combined real dataset (frozen vs learnable, same seed/split): median
+            validation centre-error <strong>43.4 → 27.4 px</strong>, with the gain self-learning to
+            <strong>1.35</strong>. Whether it moves the ceiling further is still being validated
+            (<code>TODO.md</code>).
+          </p>
+        </div>
+
+        <h3>The class / presence head</h3>
+        <p>
+          With <code>num_classes &gt; 0</code>, a head rides alongside the box head: concatenated
+          global <em>mean</em> and <em>max</em> pooling → a linear layer → logits. Mean alone washes
+          out texture (a coil and a smooth bore have near-identical channel averages); max captures
+          whether a discriminative texture fires anywhere. <code>forward</code> then returns
+          <code>(box, logits)</code>.
+        </p>
+        <p>
+          <strong>Negatives</strong> (no-object images) add a trailing <code>background</code> class
+          and force the head on. Their box loss is masked (a no-object frame has no box to fit), so
+          they teach the model to report <em>absent</em> rather than emit a spurious box. That is
+          how <code>detect</code> can return <code>present: false</code>.
+        </p>
+      </section>
+
+      <section id="training">
+        <h2>Training &amp; checkpoint selection</h2>
+        <ul>
+          <li><strong>Losses:</strong> Smooth-L1 on the box, cross-entropy on the class head, balanced by <code>--box-weight</code> / <code>--cls-weight</code> (the box loss is far smaller, so it's weighted up to keep the class gradient from drowning it).</li>
+          <li><strong>Determinism:</strong> the split is seeded and <code>torch.manual_seed(seed)</code> fixes weight init, so two runs differ only by hyperparameters — the A/B above is apples-to-apples.</li>
+          <li><strong>Best-checkpoint export:</strong> with <code>--val-frac</code>, each epoch is scored <code>accuracy − err/size</code> (accuracy leads, but boxes count ~50× more than the old scaling), and the best state — not the last, possibly-overfit epoch — is what gets exported.</li>
+          <li><strong>Box error on positives only:</strong> negatives have no box, so a collapsed box can't hide behind classification accuracy.</li>
+        </ul>
+      </section>
+
+      <section id="quantization">
+        <h2>Quantization &amp; export</h2>
+        <p>The path from a trained graph to the file the edge loads:</p>
+        <ol>
+          <li><strong>Export on CPU</strong> (ONNX export from an MPS graph is unreliable). Legacy TorchScript exporter, opset 17 — a static tiny CNN needs nothing fancier, and it avoids the <code>onnxscript</code> dependency the dynamo exporter requires.</li>
+          <li><strong>Dynamic quantization</strong> via onnxruntime: weights to <code>QUInt8</code>. This is what yields the ~81 KB int8 file.</li>
+          <li><strong>Embed class names</strong> in the ONNX <code>metadata_props</code> (<code>class_names</code> as JSON), so the model is self-describing — the runtime maps a class id to a name, and tells <em>present</em> from <em>background</em>, with no hard-coded training-time ordering.</li>
+        </ol>
+        <p>
+          Output names are fixed: <code>image</code> in, <code>box</code> (and <code>logits</code>
+          for a class head) out, named so the runtime reads each by name regardless of graph order.
+          A dynamic batch axis is declared on every IO.
+        </p>
+      </section>
+
+      <section id="devices">
+        <h2>Compute &amp; device resolution</h2>
+        <p>
+          The core is dependency-free and CPU-only — geometry, codec, formats, inference.
+          Everything heavy is a sibling package behind an extra:
+        </p>
+        <ul>
+          <li><strong>Generation</strong> is a hosted Gemini API call (no GPU) behind the <code>gemini</code> extra.</li>
+          <li><strong>Auto-labeling</strong> (GroundingDINO) and <strong>training</strong> are GPU-heavy and resolve their device <strong>cuda → mps → cpu</strong>.</li>
+        </ul>
+        <p>
+          So the dev loop runs on this Mac Studio's MPS and scales out to a CUDA box or AWS g5/g6
+          for bulk runs. The auto-labeler also sets <code>PYTORCH_ENABLE_MPS_FALLBACK=1</code> so
+          unimplemented MPS ops fall back to CPU instead of erroring. Inference itself defaults to
+          the <code>CPUExecutionProvider</code>.
+        </p>
+      </section>
+
+      <section id="review">
+        <h2>The review gate</h2>
+        <p>
+          AI-generated labels are never trainable until a human has validated them — and this is
+          enforced in one place, <code>tensor_factory.review</code>, so the rule is identical across
+          generation, labeling, and training.
+        </p>
+        <p>Every COCO annotation (and image) carries two extra keys:</p>
+        <table>
+          <thead><tr><th>Key</th><th>Values</th><th>Trainable?</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="3"><code>review</code></td><td><code>pending</code></td><td>no (the default; a missing key normalizes here)</td></tr>
+            <tr><td><code>approved</code></td><td><strong>yes</strong></td></tr>
+            <tr><td><code>rejected</code></td><td>no</td></tr>
+            <tr><td rowspan="3"><code>source</code></td><td><code>groundingdino</code></td><td>a guess → starts <code>pending</code></td></tr>
+            <tr><td><code>human</code></td><td>corrected in Label Studio → <code>approved</code></td></tr>
+            <tr><td><code>synthetic_gt</code></td><td>mock generator's exact box → <code>approved</code> on creation</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Untrusted-by-default is the safe failure mode: an unmarked label doesn't sneak into
+          training. The loaders enforce it (<code>require_review=True</code>); <code>fit</code>
+          refuses an all-pending dataset with guidance to triage it first. <code>--allow-unreviewed</code>
+          is the deliberate override — the fast path that trains straight on GroundingDINO labels
+          after a contact-sheet QC. Negatives are exempt: a known absence is trainable by
+          construction.
+        </p>
+      </section>
+
+      <section id="serving">
+        <h2>Two serving surfaces, one core</h2>
+        <p>
+          The MCP server and the HTTP endpoint are both thin wrappers over
+          <code>tensor_factory_mcp.core</code>, so they return byte-identical JSON. The core caches
+          <code>Detector</code> instances by <code>(model, input_size)</code> (an LRU), so repeated
+          calls reuse the ONNX session.
+        </p>
+        <table>
+          <thead><tr><th></th><th>tensor-factory-mcp</th><th>tensor-factory-http</th></tr></thead>
+          <tbody>
+            <tr><td>Transport</td><td>stdio (MCP)</td><td>HTTP (stdlib <code>http.server</code>)</td></tr>
+            <tr><td>Deps</td><td><code>mcp</code>, <code>pydantic</code></td><td>none beyond the core</td></tr>
+            <tr><td>Default bind</td><td>—</td><td><code>127.0.0.1</code></td></tr>
+            <tr><td>Surface</td><td>3 read-only tools</td><td><code>/health</code>, <code>/model_info</code>, <code>/detect</code></td></tr>
+          </tbody>
+        </table>
+        <p>The HTTP layer maps undecodable bytes to a <code>400</code> (not a <code>500</code> trace), caps the body at <code>--max-mb</code> (<code>413</code>), and keeps the server version out of its headers — small defensive choices for a thing that takes raw bytes over the wire.</p>
+      </section>
+
+      <section id="layout">
+        <h2>Package layout</h2>
+        <p>A <code>uv</code> workspace of five packages, one lockfile, src layout, each shipping <code>py.typed</code>:</p>
+        <table>
+          <thead><tr><th>Package</th><th>Deps</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>tensor-factory</code></td><td>none (<code>infer</code> extra: onnxruntime, numpy, pillow)</td><td>geometry, codec, formats, review, inference + CLI</td></tr>
+            <tr><td><code>tensor-factory-synth</code></td><td>pillow (<code>gemini</code>, <code>gpu</code> extras)</td><td>generation + GroundingDINO labeling + export</td></tr>
+            <tr><td><code>tensor-factory-train</code></td><td>numpy, onnxruntime (<code>train</code> extra: torch)</td><td>the tiny detector → int8 ONNX</td></tr>
+            <tr><td><code>tensor-factory-mcp</code></td><td>tensor-factory[infer], mcp, pydantic</td><td>MCP + HTTP serving (bundled models)</td></tr>
+            <tr><td><code>tensor-factory-label</code></td><td>httpx</td><td>Label Studio push/pull</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Shared dev tooling and lint/test config live at the root, not per-package: <code>ruff</code>
+          (line length 100), <code>ty</code> for types, <code>pytest</code> with <code>unit</code> /
+          <code>integration</code> markers. New libraries drop under <code>packages/&lt;name&gt;/</code> and
+          <code>[tool.uv.workspace] members = ["packages/*"]</code> picks them up automatically.
+        </p>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#contract">Detection contract</a>
+      <a href="#model">The model</a>
+      <a href="#training">Training</a>
+      <a href="#quantization">Quantization</a>
+      <a href="#devices">Devices</a>
+      <a href="#review">The review gate</a>
+      <a href="#serving">Serving surfaces</a>
+      <a href="#layout">Package layout</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="api.html"><span class="lbl">Prev</span>&larr; Python API</a>
+      <a class="nxt" href="getting-started.html"><span class="lbl">Back to</span>Getting started &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CLI reference — tensor-factory</title>
+<meta name="description" content="Every command and flag across the tensor-factory packages: detect, bench, synth, train, label, the MCP and HTTP servers, and the install extras." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html">Start</a>
+          <a href="pipeline.html">Pipeline</a>
+          <a href="cli.html" class="here">CLI</a>
+          <a href="api.html">API</a>
+          <a href="architecture.html">Internals</a>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">Reference</p>
+    <h1>CLI <em>reference</em></h1>
+    <p class="lede">
+      Every command across the five packages. Each ships a console script; run them through
+      <code>uv run</code> so the locked workspace environment is used.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="conventions">
+        <h2>Conventions</h2>
+        <ul>
+          <li>All commands are <code>uv run &lt;script&gt; …</code> from the repo root.</li>
+          <li><code>--help</code> works on every command and subcommand.</li>
+          <li>Importing a CLI never pulls heavy deps eagerly — <code>tensor-factory --help</code> works without the inference extra; subcommands lazy-import what they need.</li>
+        </ul>
+        <table>
+          <thead><tr><th>Script</th><th>Package</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>tensor-factory</code></td><td>tensor-factory</td><td>inference: detect, bench</td></tr>
+            <tr><td><code>tensor-factory-synth</code></td><td>tensor-factory-synth</td><td>generate, label, triage</td></tr>
+            <tr><td><code>tensor-factory-train</code></td><td>tensor-factory-train</td><td>train + export int8 ONNX</td></tr>
+            <tr><td><code>tensor-factory-label</code></td><td>tensor-factory-label</td><td>Label Studio push/pull</td></tr>
+            <tr><td><code>tensor-factory-mcp</code></td><td>tensor-factory-mcp</td><td>MCP server (stdio)</td></tr>
+            <tr><td><code>tensor-factory-http</code></td><td>tensor-factory-mcp</td><td>HTTP detection endpoint</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="core">
+        <h2>tensor-factory</h2>
+        <p>The inference harness. Two subcommands.</p>
+
+        <h3>detect</h3>
+        <p>Detect the target object in one image; print the box in normalized and 8-bit form.</p>
+        <div class="sig">tensor-factory detect --model PATH --image PATH [--size 480]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--model</code></td><td>—  (required)</td><td>path to the ONNX model</td></tr>
+            <tr><td><code>--image</code></td><td>—  (required)</td><td>path to the input image</td></tr>
+            <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>bench</h3>
+        <p>Measure CPU throughput (fps).</p>
+        <div class="sig">tensor-factory bench --model PATH [--image PATH] [--n 100] [--size 480]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--model</code></td><td>—  (required)</td><td>path to the ONNX model</td></tr>
+            <tr><td><code>--image</code></td><td>gray frame</td><td>image to loop on (default: synthetic gray)</td></tr>
+            <tr><td><code>--n</code></td><td><code>100</code></td><td>iterations</td></tr>
+            <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="synth">
+        <h2>tensor-factory-synth</h2>
+        <p>Generation, auto-labeling, and triage. Global flags precede the subcommand.</p>
+        <div class="sig">tensor-factory-synth [--backend mock|gemini] [--size 480] &lt;sample|dataset|triage&gt; …</div>
+        <table>
+          <thead><tr><th>Global flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--backend</code></td><td><code>mock</code></td><td>generation backend: <code>mock</code> (anywhere) or <code>gemini</code> (Nano Banana)</td></tr>
+            <tr><td><code>--size</code></td><td><code>480</code></td><td>image size (px)</td></tr>
+            <tr><td><code>--seed</code></td><td><code>0</code></td><td>starting seed</td></tr>
+          </tbody>
+        </table>
+
+        <h3>sample</h3>
+        <p>Render a contact sheet for one prompt — eyeball aesthetics before a full run.</p>
+        <div class="sig">…synth sample --prompt STR [--n 9] [--cols 3] [--out samples.png]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--prompt</code></td><td>—  (required)</td><td>generation prompt</td></tr>
+            <tr><td><code>--n</code></td><td><code>9</code></td><td>number of samples</td></tr>
+            <tr><td><code>--cols</code></td><td><code>3</code></td><td>grid columns</td></tr>
+            <tr><td><code>--out</code></td><td><code>samples.png</code></td><td>output PNG</td></tr>
+          </tbody>
+        </table>
+
+        <h3>dataset</h3>
+        <p>Generate <code>n</code> images, optionally auto-label (gemini backend), and write a COCO dataset + Label Studio pre-annotations.</p>
+        <div class="sig">…synth dataset --prompt STR --features F [F …] [--n 64] [--out dataset] [--no-label] [--skip-errors]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--prompt</code></td><td>—  (required)</td><td>generation prompt</td></tr>
+            <tr><td><code>--features</code></td><td>—  (required)</td><td>one or more feature phrases to detect</td></tr>
+            <tr><td><code>--n</code></td><td><code>64</code></td><td>number of images</td></tr>
+            <tr><td><code>--out</code></td><td><code>dataset</code></td><td>output directory</td></tr>
+            <tr><td><code>--no-label</code></td><td>off</td><td>skip auto-labeling (gemini only)</td></tr>
+            <tr><td><code>--skip-errors</code></td><td>off</td><td>log and skip per-image failures instead of aborting</td></tr>
+          </tbody>
+        </table>
+        <p>Output: <code>images/img_SEED.png</code>, <code>annotations.coco.json</code>, <code>label_studio.json</code>.</p>
+
+        <h3>triage</h3>
+        <p>Summarize a dataset's review state (approved / pending / rejected, plus trainable count).</p>
+        <div class="sig">…synth triage --data DIR</div>
+
+        <h3>Batch scripts</h3>
+        <p>Helicoils-example scripts under <code>packages/tensor-factory-synth/scripts/</code>, run with <code>uv run --with google-genai python …</code> (all read <code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code>):</p>
+        <table>
+          <thead><tr><th>Script</th><th>Key args (defaults)</th><th>Produces</th></tr></thead>
+          <tbody>
+            <tr><td><code>gen_samples.py</code></td><td><code>--n 25 --out images --seed 20260620 --reference … --workers 5</code></td><td>QC samples + <code>manifest.json</code></td></tr>
+            <tr><td><code>build_ds.py</code></td><td>positional <code>[out] [n=170] [reference]</code></td><td>generate → GroundingDINO label → COCO</td></tr>
+            <tr><td><code>gen_negatives.py</code></td><td><code>--n 110 --out …/negatives_pool --seed 200000 --workers 6</code></td><td>negatives + <code>manifest.json</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="train">
+        <h2>tensor-factory-train</h2>
+        <p>One subcommand: <code>fit</code> — train on a COCO dataset and export an int8 ONNX model.</p>
+        <div class="sig">tensor-factory-train fit --data DIR [--out model.onnx] [options]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--data</code></td><td>—  (required)</td><td>dataset dir (<code>annotations.coco.json</code> + images)</td></tr>
+            <tr><td><code>--out</code></td><td><code>model.onnx</code></td><td>output ONNX path</td></tr>
+            <tr><td><code>--epochs</code></td><td><code>10</code></td><td>training epochs</td></tr>
+            <tr><td><code>--batch</code></td><td><code>16</code></td><td>batch size</td></tr>
+            <tr><td><code>--lr</code></td><td><code>1e-3</code></td><td>learning rate</td></tr>
+            <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
+            <tr><td><code>--width</code></td><td><code>16</code></td><td>model channel width</td></tr>
+            <tr><td><code>--device</code></td><td>auto</td><td><code>cuda</code>/<code>mps</code>/<code>cpu</code> (default resolves cuda → mps → cpu)</td></tr>
+            <tr><td><code>--classify</code></td><td>off</td><td>train a class head (categories from the COCO file)</td></tr>
+            <tr><td><code>--val-frac</code></td><td><code>0.0</code></td><td>held-out fraction for metrics + best-checkpoint export</td></tr>
+            <tr><td><code>--box-weight</code></td><td><code>1.0</code></td><td>weight on the box loss</td></tr>
+            <tr><td><code>--cls-weight</code></td><td><code>1.0</code></td><td>weight on the class loss</td></tr>
+            <tr><td><code>--augment</code></td><td>off</td><td>random flip augmentation</td></tr>
+            <tr><td><code>--negatives</code></td><td>none</td><td>one or more dirs of no-object images → a <code>background</code> class (forces presence head; box loss masked)</td></tr>
+            <tr><td><code>--allow-unreviewed</code></td><td>off</td><td>train on un-validated labels too (default: only human-approved)</td></tr>
+            <tr><td><code>--freeze-gain</code></td><td>off</td><td>freeze the soft-argmax gain at 1 (ablation; default lets it learn)</td></tr>
+          </tbody>
+        </table>
+        <p>Needs the <code>train</code> extra (<code>torch</code>). See <a class="inline" href="architecture.html#model">Internals &rsaquo; the model</a> for what <code>--width</code> and <code>--freeze-gain</code> change.</p>
+      </section>
+
+      <section id="label">
+        <h2>tensor-factory-label</h2>
+        <p>Label Studio integration. Global flags select the server.</p>
+        <div class="sig">tensor-factory-label [--url URL] [--token TOK] &lt;config|push|pull&gt; …</div>
+        <table>
+          <thead><tr><th>Global flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--url</code></td><td><code>$LABEL_STUDIO_URL</code> → <code>http://localhost:8080</code></td><td>Label Studio base URL</td></tr>
+            <tr><td><code>--token</code></td><td><code>$LABEL_STUDIO_API_KEY</code></td><td>API token (required)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>config</h3>
+        <p>Print the RectangleLabels config XML for a project.</p>
+        <div class="sig">…label config [--labels L [L …]]   <span class="ret"># default: helicoil</span></div>
+
+        <h3>push</h3>
+        <p>Create a project and import the COCO dataset, with the candidate boxes as predictions.</p>
+        <div class="sig">…label push --data DIR [--title "tensor_factory"] [--image-base URL]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--data</code></td><td>—  (required)</td><td>dataset dir (<code>annotations.coco.json</code> + <code>images/</code>)</td></tr>
+            <tr><td><code>--title</code></td><td><code>tensor_factory</code></td><td>project title</td></tr>
+            <tr><td><code>--image-base</code></td><td>local storage</td><td>HTTP base serving the images; omit to use Label Studio local storage</td></tr>
+          </tbody>
+        </table>
+        <p>Prints the project id and labeling URL.</p>
+
+        <h3>pull</h3>
+        <p>Export corrected annotations back to COCO, stamped <code>review=approved</code>, <code>source=human</code> (now trainable).</p>
+        <div class="sig">…label pull --project ID [--out annotations.coco.json]</div>
+        <p>Tasks with no rectangle (or cancelled) annotations are skipped.</p>
+      </section>
+
+      <section id="mcp">
+        <h2>tensor-factory-mcp</h2>
+        <p>FastMCP server over stdio. Defaults to the bundled <code>helicoil-presence-v3.onnx</code>.</p>
+        <div class="sig">tensor-factory-mcp [--version]</div>
+        <p>Three read-only tools, each taking an optional <code>model_path</code> and <code>input_size</code> (16–4096, default 480):</p>
+        <table>
+          <thead><tr><th>Tool</th><th>Returns</th></tr></thead>
+          <tbody>
+            <tr><td><code>tensor_factory_detect</code></td><td>box (norm/pixel/uint8), image size, model — plus <code>present</code>/<code>class_name</code>/<code>class_id</code>/<code>class_score</code> for a presence-head model</td></tr>
+            <tr><td><code>tensor_factory_model_info</code></td><td>resolved model, input size, input name, ORT providers</td></tr>
+            <tr><td><code>tensor_factory_benchmark</code></td><td>fps over <code>n</code> iterations (1–10000, default 100)</td></tr>
+          </tbody>
+        </table>
+        <p>On failure each tool returns <code>Error: &lt;type&gt;: &lt;message&gt;</code> rather than raising.</p>
+      </section>
+
+      <section id="http">
+        <h2>tensor-factory-http</h2>
+        <p>Stdlib <code>http.server</code> endpoint over the same core inference. Binds loopback by default.</p>
+        <div class="sig">tensor-factory-http [--host 127.0.0.1] [--port 8088] [--model PATH] [--input-size 480] [--max-mb 25]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--host</code></td><td><code>127.0.0.1</code></td><td>bind host (use <code>0.0.0.0</code> to expose deliberately)</td></tr>
+            <tr><td><code>--port</code></td><td><code>8088</code></td><td>bind port (<code>0</code> = ephemeral)</td></tr>
+            <tr><td><code>--model</code></td><td>bundled</td><td>ONNX model path</td></tr>
+            <tr><td><code>--input-size</code></td><td><code>480</code></td><td>square model input (px)</td></tr>
+            <tr><td><code>--max-mb</code></td><td><code>25</code></td><td>reject request bodies larger than this</td></tr>
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Route</th><th>Response</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /health</code></td><td><code>{"status":"ok"}</code></td></tr>
+            <tr><td><code>GET /model_info</code></td><td>model path, input size, IO name, ORT providers</td></tr>
+            <tr><td><code>POST /detect</code></td><td>body = raw image bytes → the same JSON as the MCP <code>detect</code> tool</td></tr>
+          </tbody>
+        </table>
+        <p>Bad image bytes → <code>400</code>; missing <code>Content-Length</code> → <code>411</code>; empty body → <code>400</code>; over <code>--max-mb</code> → <code>413</code>; unknown route → <code>404</code>.</p>
+      </section>
+
+      <section id="quickstart">
+        <h2>./Quickstart</h2>
+        <p>The repo's top-level entry point.</p>
+        <table>
+          <thead><tr><th>Invocation</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>./Quickstart</code></td><td>bootstrap (<code>uv sync --locked --all-packages</code>) then run the MCP server (stdio, bundled model)</td></tr>
+            <tr><td><code>./Quickstart -c</code></td><td>full local gate: sync → <code>ruff check --fix</code> → <code>ruff format</code> → <code>ty check</code> → <code>pytest -m unit</code></td></tr>
+            <tr><td><code>./Quickstart -u</code></td><td>unit tests only</td></tr>
+            <tr><td><code>./Quickstart -p</code></td><td>full gate, then <code>uv build</code> + <code>uv publish</code> (needs <code>UV_PUBLISH_TOKEN</code>)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="extras">
+        <h2>Install extras</h2>
+        <p>The default <code>uv sync</code> stays light. Heavy steps live behind extras you pull only when needed:</p>
+        <table>
+          <thead><tr><th>Extra</th><th>Package</th><th>Pulls</th><th>For</th></tr></thead>
+          <tbody>
+            <tr><td><code>infer</code></td><td>tensor-factory</td><td>onnxruntime, numpy, pillow</td><td>CPU inference</td></tr>
+            <tr><td><code>gemini</code></td><td>tensor-factory-synth</td><td>google-genai</td><td>Nano Banana generation (needs <code>GEMINI_API_KEY</code>)</td></tr>
+            <tr><td><code>gpu</code></td><td>tensor-factory-synth</td><td>torch, transformers, accelerate</td><td>GroundingDINO auto-labeling</td></tr>
+            <tr><td><code>train</code></td><td>tensor-factory-train</td><td>torch</td><td>training</td></tr>
+          </tbody>
+        </table>
+        <p>Pull an extra with e.g. <code>uv sync --extra gemini</code>, or run a one-off with <code>uv run --with google-genai …</code>.</p>
+        <h4>Environment variables</h4>
+        <table>
+          <thead><tr><th>Variable</th><th>Used by</th></tr></thead>
+          <tbody>
+            <tr><td><code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code></td><td>Nano Banana generation</td></tr>
+            <tr><td><code>LABEL_STUDIO_URL</code> / <code>LABEL_STUDIO_API_KEY</code></td><td>Label Studio push/pull</td></tr>
+            <tr><td><code>UV_PUBLISH_TOKEN</code></td><td><code>./Quickstart -p</code> publish</td></tr>
+            <tr><td><code>PYTORCH_ENABLE_MPS_FALLBACK</code></td><td>set automatically by the auto-labeler for MPS</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#conventions">Conventions</a>
+      <a href="#core">tensor-factory</a>
+      <a href="#synth">…-synth</a>
+      <a href="#train">…-train</a>
+      <a href="#label">…-label</a>
+      <a href="#mcp">…-mcp</a>
+      <a href="#http">…-http</a>
+      <a href="#quickstart">./Quickstart</a>
+      <a href="#extras">Install extras</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="pipeline.html"><span class="lbl">Prev</span>&larr; The pipeline</a>
+      <a class="nxt" href="api.html"><span class="lbl">Next</span>Python API &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>

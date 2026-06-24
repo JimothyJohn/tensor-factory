@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Getting started — tensor-factory</title>
+<meta name="description" content="Install the tensor-factory workspace, run the bundled int8 detector on CPU, and serve it over MCP or HTTP." />
+<meta name="color-scheme" content="dark light" />
+<script>
+  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="col">
+    <div class="top">
+      <a class="brand" href="index.html">tensor<span class="dot">·</span>factory</a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="getting-started.html" class="here">Start</a>
+          <a href="pipeline.html">Pipeline</a>
+          <a href="cli.html">CLI</a>
+          <a href="api.html">API</a>
+          <a href="architecture.html">Internals</a>
+          <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <header class="col doc-head">
+    <p class="kicker">User guide</p>
+    <h1>Getting <em>started</em></h1>
+    <p class="lede">
+      Clone, sync, and run the bundled int8 detector on CPU in under a minute — no GPU, no
+      API keys, no model to download. Then point it at your own images, or serve it over
+      MCP or HTTP.
+    </p>
+  </header>
+
+  <div class="col doc-layout">
+    <main class="prose">
+
+      <section id="requirements">
+        <h2>Requirements</h2>
+        <ul>
+          <li><strong>Python ≥ 3.11.</strong> The whole workspace targets it.</li>
+          <li><strong><a class="inline" href="https://docs.astral.sh/uv/">uv</a></strong> for the env and build. The <code>./Quickstart</code> script auto-installs it if missing.</li>
+          <li><strong>No GPU at runtime.</strong> Inference is CPU-only via onnxruntime. A GPU (CUDA or Apple MPS) is only needed for the offline <em>training</em> and <em>auto-labeling</em> steps.</li>
+        </ul>
+        <p>
+          tensor-factory is a <code>uv</code> workspace (monorepo) of five packages. One
+          lockfile, <code>uv.lock</code>, covers them all. See <a class="inline" href="architecture.html#layout">the layout</a>
+          for what each package does.
+        </p>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <p>Clone and sync the locked workspace:</p>
+<pre><span class="c"># clone</span>
+git clone https://github.com/JimothyJohn/tensor-factory
+cd tensor-factory
+
+<span class="c"># sync every workspace package against the lockfile</span>
+uv sync --locked --all-packages</pre>
+        <p>
+          That installs the core library plus the inference runtime (onnxruntime, numpy,
+          pillow) and the MCP/HTTP servers. Heavy extras — <code>torch</code> for training,
+          GroundingDINO for auto-labeling, <code>google-genai</code> for generation — are
+          <em>not</em> pulled by a default sync; you add them only when you run those steps
+          (see <a class="inline" href="cli.html#extras">CLI &rsaquo; extras</a>).
+        </p>
+        <div class="note">
+          <span class="tag">Zero-setup path</span>
+          <p>
+            Just want it running? <code>./Quickstart</code> with no flags bootstraps the
+            workspace and launches the MCP detection server on the bundled demo model.
+            It needs no API keys and no GPU.
+          </p>
+        </div>
+      </section>
+
+      <section id="first-detection">
+        <h2>Your first detection</h2>
+        <p>
+          The <code>tensor-factory-mcp</code> package bundles two ready-to-run int8 models, so
+          you can detect against one immediately. Point the core CLI at any image:
+        </p>
+<pre><span class="c"># the bundled real-data model (presence head): helicoil-presence-v3.onnx</span>
+MODEL=packages/tensor-factory-mcp/src/tensor_factory_mcp/models/helicoil-presence-v3.onnx
+
+uv run tensor-factory detect --model "$MODEL" --image frame.png</pre>
+        <p>Output is the box in both normalized and 8-bit form:</p>
+<pre><span class="c"># illustrative — your numbers depend on the image</span>
+box   (norm xyxy): 0.2106 0.3318 0.7882 0.7901
+uint8 (x1 y1 x2 y2): 54 85 201 201</pre>
+        <p>
+          Those four <code>uint8</code> values <em>are</em> the detection — the whole
+          on-the-wire contract. See <a class="inline" href="architecture.html#contract">the detection contract</a>
+          for why four bytes is enough.
+        </p>
+        <h3>Bundled models</h3>
+        <table>
+          <thead><tr><th>File</th><th>Trained on</th><th>Head</th></tr></thead>
+          <tbody>
+            <tr><td><code>helicoil-presence-v3.onnx</code></td><td>real data</td><td>box + presence (reports <em>present / absent</em>)</td></tr>
+            <tr><td><code>helicoil-mock-v1.onnx</code></td><td>synthetic mock</td><td>box only</td></tr>
+          </tbody>
+        </table>
+        <p>
+          The presence model is the default the servers resolve. Both live under
+          <code>packages/tensor-factory-mcp/src/tensor_factory_mcp/models/</code>.
+        </p>
+      </section>
+
+      <section id="benchmark">
+        <h2>Benchmark it</h2>
+        <p>Measure CPU throughput on a synthetic gray frame (or a real one with <code>--image</code>):</p>
+<pre>uv run tensor-factory bench --model "$MODEL"
+<span class="c"># 204.3 fps  (100 runs, 480px, CPU)</span></pre>
+        <p>
+          The reference numbers — ~204 fps @ 480 px, 81 KB int8 model — are from the
+          helicoils example. Architecture and throughput hold across models trained from
+          the same recipe.
+        </p>
+      </section>
+
+      <section id="serve">
+        <h2>Serve it</h2>
+        <p>There are two ways to expose the detector to other processes. Both wrap the same core inference, so they return byte-identical JSON.</p>
+
+        <h3>MCP (stdio)</h3>
+        <p>For MCP clients (editors, agents). The server speaks over stdio and exits on EOF when no client is attached:</p>
+<pre>uv run tensor-factory-mcp</pre>
+        <p>Register it in a project via <code>.mcp.json</code>:</p>
+<pre>{ "mcpServers": {
+    "tensor-factory": {
+      "command": "uv",
+      "args": ["run", "--package", "tensor-factory-mcp", "tensor-factory-mcp"]
+    }
+} }</pre>
+        <p>It exposes three read-only tools: <code>tensor_factory_detect</code>, <code>tensor_factory_model_info</code>, and <code>tensor_factory_benchmark</code>. See <a class="inline" href="cli.html#mcp">CLI &rsaquo; MCP</a>.</p>
+
+        <h3>HTTP (stdlib)</h3>
+        <p>When MCP is heavier than you need — a plain JSON endpoint over <code>http.server</code>, zero extra deps. It binds <code>127.0.0.1</code> by default:</p>
+<pre>uv run tensor-factory-http --port 8088 &amp;
+
+curl http://127.0.0.1:8088/health                          <span class="c"># {"status": "ok"}</span>
+curl http://127.0.0.1:8088/model_info                      <span class="c"># model + ORT providers</span>
+curl --data-binary @frame.png http://127.0.0.1:8088/detect <span class="c"># raw bytes -&gt; detection JSON</span></pre>
+        <div class="note warn">
+          <span class="tag">Not public by default</span>
+          <p>
+            A detector on a dev box is not public-by-default. <code>tensor-factory-http</code>
+            binds loopback; pass <code>--host 0.0.0.0</code> only when you mean to expose it.
+          </p>
+        </div>
+      </section>
+
+      <section id="next">
+        <h2>Where to next</h2>
+        <ul>
+          <li><a class="inline" href="pipeline.html">The pipeline</a> — synthesize a dataset, auto-label, review, and train your own model for a new object.</li>
+          <li><a class="inline" href="cli.html">CLI reference</a> — every command and flag across the five packages.</li>
+          <li><a class="inline" href="api.html">Python API</a> — <code>BBox</code>, the codec, <code>Detector</code>, and the training functions.</li>
+          <li><a class="inline" href="architecture.html">Internals</a> — the detection contract, the soft-argmax model, quantization, and the review gate.</li>
+        </ul>
+      </section>
+
+    </main>
+
+    <nav class="toc" aria-label="On this page">
+      <span class="toc-label">On this page</span>
+      <a href="#requirements">Requirements</a>
+      <a href="#install">Install</a>
+      <a href="#first-detection">First detection</a>
+      <a href="#benchmark">Benchmark</a>
+      <a href="#serve">Serve it</a>
+      <a href="#next">Where to next</a>
+    </nav>
+  </div>
+
+  <div class="col">
+    <div class="pager">
+      <a href="index.html"><span class="lbl">Home</span>&larr; tensor-factory</a>
+      <a class="nxt" href="pipeline.html"><span class="lbl">Next</span>The pipeline &rarr;</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="col foot">
+      <span>tensor-factory — Apache-2.0</span>
+      <a href="https://github.com/JimothyJohn/tensor-factory">github.com/JimothyJohn/tensor-factory ↗</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function sync() {
+        var light = root.getAttribute("data-theme") === "light";
+        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
+        btn.setAttribute("aria-pressed", String(light));
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") === "light";
+        if (light) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "light");
+        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        sync();
+      });
+    })();
+  </script>
+
+</body>
+</html>
