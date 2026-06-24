@@ -5,6 +5,13 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 
 ## Now
 
+- [ ] **First public push to GitHub.** The tree is push-ready; remaining mechanical steps:
+  - [ ] `git remote add origin git@github.com:JimothyJohn/tensor-factory.git` and push `master`.
+  - [ ] Decide the fate of `.claude/` (the docs-drift hook + skills): commit as shared project
+    tooling, or leave local. `.claude/settings.local.json` is already gitignored.
+  - [ ] Turn on branch protection for `master` (require the CI gate) once CI has run once.
+  - [ ] Enable GitHub Pages from `docs/` so the landing page + live demo are hosted.
+  - [ ] Enable private vulnerability reporting (Settings → Security) per `SECURITY.md`.
 - [ ] **Model-in-the-loop pre-annotation (gated on v4 beating GroundingDINO).** Once the
   detector's boxes are tighter than the raw GroundingDINO auto-labels (measured against the
   human-approved subset as ground truth), close the loop: use the model itself to condition
@@ -22,6 +29,16 @@ See [`CLAUDE.md`](CLAUDE.md) for current standing.
 
 ## Recently done (this session)
 
+- [x] **In-browser demo (`docs/demo.html`).** Runs the bundled int8 models entirely
+  client-side via onnxruntime-web (WASM, single-threaded so it works on plain static hosts):
+  auto-detects a synthetic sample with the mock model on load, switch to the v4 presence
+  model and upload a real photo. Linked from every doc page's nav. Contract-tested
+  (`tests/test_demo.py`: demo models match the package byte-for-byte, load + detect via the
+  same path the JS mirrors, class names match ONNX metadata, sample is a confirmed hit) plus
+  an optional Playwright browser smoke (`tests/test_demo_browser.py`, `-m integration`).
+- [x] **OSS contribution scaffolding.** `CONTRIBUTING.md` (humans + agents), `SECURITY.md`,
+  `.github/` issue + PR templates, and a CI workflow mirroring `./Quickstart -c`.
+- [x] **Consolidated the docs site onto `master`** and fixed v3→v4 drift in the pages.
 - [x] **Merged the Nano Banana migration** into the base branch `master` (local
   fast-forward; this repo's default branch is `master`, not `main`).
 - [x] **Promoted a real model to the bundled MCP demo.** `tensor-factory-mcp` now defaults

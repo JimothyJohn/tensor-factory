@@ -4,7 +4,7 @@
 synthetic dataset, an int8 ONNX model, and a CPU inference harness. No GPU at runtime, no
 AGPL anywhere (Apache-2.0 throughout, no Ultralytics).
 
-> 📄 Project page: [`docs/index.html`](docs/index.html)
+> 📄 Project page: [`docs/index.html`](docs/index.html) · 🔬 Live demo (runs in your browser): [`docs/demo.html`](docs/demo.html)
 
 The pipeline: **synthesize → auto-label → train → run.**
 
