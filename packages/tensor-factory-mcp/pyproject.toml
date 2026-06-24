@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 tensor-factory-mcp = "tensor_factory_mcp.server:main"
+tensor-factory-http = "tensor_factory_mcp.http_server:main"
 
 [build-system]
 requires = ["hatchling"]

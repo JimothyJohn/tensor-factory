@@ -14,7 +14,7 @@ from typing import Any
 from tensor_factory.inference import Detector
 from tensor_factory.inference import benchmark as _benchmark
 
-DEFAULT_MODEL_NAME = "helicoil-mock-v1.onnx"
+DEFAULT_MODEL_NAME = "helicoil-presence-v3.onnx"
 DEFAULT_INPUT_SIZE = 480
 
 
@@ -50,24 +50,18 @@ def _detector(model_path: str, input_size: int) -> Detector:
     return Detector(model_path, input_size=input_size)
 
 
-def detect(
-    image_path: str,
-    model_path: str | None = None,
-    input_size: int = DEFAULT_INPUT_SIZE,
-) -> dict[str, Any]:
-    """Detect the helicoil in one image; return normalized, pixel, and uint8 boxes."""
-    from PIL import Image
+def _detect_image(img: Any, resolved: str, detector: Detector) -> dict[str, Any]:
+    """Build the detection result dict from an already-opened RGB ``PIL.Image``.
 
-    resolved = resolve_model(model_path)
-    detector = _detector(resolved, input_size)
-    with Image.open(image_path) as img:
-        img = img.convert("RGB")
-        width, height = img.size
-        box = detector.detect_box(img)
-        packed = detector.detect_uint8(img)
-        # A model trained with negatives has a presence/class head: report which class
-        # fired and its confidence. The box is still the 4xuint8 contract regardless.
-        classed = detector.detect(img) if detector.has_classes else None
+    Shared by :func:`detect` (path in) and :func:`detect_bytes` (HTTP body in) so the
+    two entry points return byte-identical JSON.
+    """
+    width, height = img.size
+    box = detector.detect_box(img)
+    packed = detector.detect_uint8(img)
+    # A model trained with negatives has a presence/class head: report which class fired
+    # and its confidence. The box is still the 4xuint8 contract regardless.
+    classed = detector.detect(img) if detector.has_classes else None
     px = box.to_pixels(width=width, height=height)
     result: dict[str, Any] = {
         "box_norm": {"x1": box.x1, "y1": box.y1, "x2": box.x2, "y2": box.y2},
@@ -85,6 +79,40 @@ def detect(
             result["class_name"] = name
             result["present"] = present
     return result
+
+
+def detect(
+    image_path: str,
+    model_path: str | None = None,
+    input_size: int = DEFAULT_INPUT_SIZE,
+) -> dict[str, Any]:
+    """Detect the helicoil in one image file; return normalized, pixel, and uint8 boxes."""
+    from PIL import Image
+
+    resolved = resolve_model(model_path)
+    detector = _detector(resolved, input_size)
+    with Image.open(image_path) as img:
+        return _detect_image(img.convert("RGB"), resolved, detector)
+
+
+def detect_bytes(
+    data: bytes,
+    model_path: str | None = None,
+    input_size: int = DEFAULT_INPUT_SIZE,
+) -> dict[str, Any]:
+    """Detect in raw image bytes (e.g. an HTTP request body); same JSON as :func:`detect`.
+
+    Raises whatever ``PIL.Image.open`` raises on undecodable bytes -- the HTTP layer maps
+    that to a 400 rather than letting it 500.
+    """
+    import io
+
+    from PIL import Image
+
+    resolved = resolve_model(model_path)
+    detector = _detector(resolved, input_size)
+    with Image.open(io.BytesIO(data)) as img:
+        return _detect_image(img.convert("RGB"), resolved, detector)
 
 
 def model_info(

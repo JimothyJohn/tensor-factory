@@ -11,6 +11,13 @@ def image(tmp_path):
     return str(p)
 
 
+@pytest.fixture
+def mock_model():
+    # The box-only demo model is still bundled alongside the default presence model, so
+    # tests can exercise the no-class-head path explicitly.
+    return str(core.default_model_path().parent / "helicoil-mock-v1.onnx")
+
+
 @pytest.mark.unit
 def test_default_model_exists():
     assert core.default_model_path().exists()
@@ -27,16 +34,26 @@ def test_presence_maps_class_to_name_and_flag():
 
 
 @pytest.mark.unit
-def test_detect_box_only_model_has_no_presence_fields(image):
-    # The bundled demo is box-only (no class head): no class_*/present keys leak in.
-    out = core.detect(image)
+def test_detect_box_only_model_has_no_presence_fields(image, mock_model):
+    # A box-only model (no class head): no class_*/present keys leak in.
+    out = core.detect(image, model_path=mock_model)
     assert "present" not in out and "class_id" not in out
+
+
+@pytest.mark.unit
+def test_detect_presence_model_reports_present(image):
+    # The default model now carries a presence head -> class_*/present fields appear.
+    out = core.detect(image)
+    assert isinstance(out["present"], bool)
+    assert out["class_name"] in {"helicoil", "background"}
+    assert 0.0 <= out["class_score"] <= 1.0
 
 
 @pytest.mark.unit
 def test_detect_shape_and_ranges(image):
     out = core.detect(image)
-    assert set(out) == {"box_norm", "box_pixels", "uint8", "image_size", "model"}
+    # The box/image fields are always present; a presence model adds class_* on top.
+    assert {"box_norm", "box_pixels", "uint8", "image_size", "model"} <= set(out)
     assert out["image_size"] == {"width": 200, "height": 150}
     n = out["box_norm"]
     assert 0.0 <= n["x1"] <= 1.0 and n["x1"] <= n["x2"]
