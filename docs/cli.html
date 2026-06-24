@@ -7,11 +7,11 @@
 <meta name="description" content="Every command and flag across the tensor-factory packages: detect, bench, synth, train, label, the MCP and HTTP servers, and the install extras." />
 <meta name="color-scheme" content="dark light" />
 <script>
-  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+  try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -29,7 +29,7 @@
           <a href="demo.html">Demo</a>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
           <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
           <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
         </button>
@@ -335,16 +335,16 @@
       var root = document.documentElement;
       var btn = document.getElementById("theme-toggle");
       function sync() {
-        var light = root.getAttribute("data-theme") === "light";
-        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
-        btn.setAttribute("aria-pressed", String(light));
+        var dark = root.getAttribute("data-theme") === "dark";
+        btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+        btn.setAttribute("aria-pressed", String(dark));
       }
       sync();
       btn.addEventListener("click", function () {
-        var light = root.getAttribute("data-theme") === "light";
-        if (light) root.removeAttribute("data-theme");
-        else root.setAttribute("data-theme", "light");
-        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        var dark = root.getAttribute("data-theme") === "dark";
+        if (dark) root.removeAttribute("data-theme");
+        else root.setAttribute("data-theme", "dark");
+        try { localStorage.setItem("tf-theme", dark ? "light" : "dark"); } catch (e) {}
         sync();
       });
     })();

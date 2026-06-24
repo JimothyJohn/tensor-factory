@@ -5,63 +5,72 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Live demo — tensor-factory</title>
 <meta name="description" content="Run a tiny int8 helicoil detector entirely in your browser — no server, no upload. The same ONNX model the CLI runs, on WebAssembly." />
-<meta name="color-scheme" content="dark light" />
+<meta name="color-scheme" content="light dark" />
 <script>
-  try { if (localStorage.getItem("tf-theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+  try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..560;1,9..144,300..400&family=Spline+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 <style>
-  /* demo-only UI; everything else inherits the shared docs styles */
+  /* demo-only UI; the shell + tokens come from style.css */
   .demo-grid { display: grid; grid-template-columns: 1fr 18rem; gap: clamp(1.4rem, 4vw, 2.6rem); align-items: start; }
   @media (max-width: 820px) { .demo-grid { grid-template-columns: 1fr; } }
 
+  /* the specimen plate — a framed object under glass, with registration ticks */
   .stage {
-    position: relative; border: 1px solid var(--line-2); border-radius: 6px;
-    background: var(--paper-2); overflow: hidden; aspect-ratio: 1 / 1;
-    display: flex; align-items: center; justify-content: center;
+    position: relative; border: 2px solid var(--line); background: var(--paper-2);
+    overflow: hidden; aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
   }
+  .stage::before, .stage::after { content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none; z-index: 3; }
+  .stage::before { left: 7px; top: 7px; border-left: 2px solid var(--red); border-top: 2px solid var(--red); }
+  .stage::after { right: 7px; bottom: 7px; border-right: 2px solid var(--red); border-bottom: 2px solid var(--red); }
   .stage canvas { width: 100%; height: 100%; display: block; }
   .stage .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--muted); font-family: var(--mono); font-size: 0.8rem; text-align: center; padding: 2rem; }
-  .stage.busy::after {
-    content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--paper) 55%, transparent);
-  }
-  .stage .spin { position: absolute; width: 1.6rem; height: 1.6rem; border: 2px solid var(--line-2);
-    border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+    color: var(--muted); font-family: var(--mono); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em;
+    text-align: center; padding: 2rem; }
+  .stage.busy::after { opacity: 0; }
+  .stage .spin { position: absolute; width: 1.6rem; height: 1.6rem; border: 2px solid var(--hair);
+    border-top-color: var(--red); border-radius: 50%; animation: spin .7s linear infinite; display: none; z-index: 4; }
   .stage.busy .spin { display: block; }
+  .stage.drag { background: var(--paper); }
+  .stage.drag::before, .stage.drag::after { width: 100%; height: 100%; left: 0; top: 0; right: 0; bottom: 0; border: 2px dashed var(--red); }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .stage-cap { font-family: var(--mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--muted); margin-top: 0.6rem; display: flex; justify-content: space-between; }
 
-  .controls { display: flex; flex-direction: column; gap: 1rem; }
-  .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 999px; padding: 2px; font-family: var(--mono); font-size: 0.76rem; }
-  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
-    padding: 0.4rem 0.85rem; border-radius: 999px; transition: background .25s, color .25s; }
-  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--paper); }
+  .controls { display: flex; flex-direction: column; gap: 0.9rem; }
+  .ctl-label { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--muted); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--line); font-family: var(--mono);
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--ink); cursor: pointer;
+    padding: 0.55rem 0.4rem; transition: background .2s, color .2s; }
+  .seg button:first-child { border-right: 2px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--red); color: var(--on-red); }
 
-  .btn { appearance: none; font-family: var(--mono); font-size: 0.8rem; cursor: pointer;
-    border: 1px solid var(--line-2); background: var(--paper-2); color: var(--ink);
-    border-radius: 5px; padding: 0.6rem 0.9rem; transition: border-color .25s, color .25s; text-align: left; }
-  .btn:hover { border-color: var(--accent); color: var(--accent); }
-  .btn.primary { border-color: var(--accent); color: var(--accent-d); }
-  .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-  .row .btn { flex: 1; }
+  .btn { appearance: none; font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    cursor: pointer; border: 2px solid var(--line); background: transparent; color: var(--ink);
+    padding: 0.6rem 0.8rem; transition: background .2s, color .2s; text-align: left; }
+  .btn:hover { background: var(--ink); color: var(--paper); }
+  .btn.primary { background: var(--red); border-color: var(--red); color: var(--on-red); }
+  .btn.primary:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 
-  .badge { font-family: var(--mono); font-size: 0.78rem; padding: 0.5rem 0.8rem; border-radius: 5px;
-    display: flex; align-items: center; gap: 0.5rem; border: 1px solid var(--line-2); color: var(--ink-2); }
-  .badge .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); }
-  .badge.present { border-color: var(--accent); color: var(--accent-d); }
-  .badge.present .dot { background: var(--accent); }
-  .badge.absent { border-color: #d8a657; color: #d8a657; }
-  .badge.absent .dot { background: #d8a657; }
+  .badge { font-family: var(--mono); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 0.6rem 0.8rem; border: 2px solid var(--line); color: var(--ink-2); display: flex; align-items: center; gap: 0.55rem; }
+  .badge .dot { width: 0.66rem; height: 0.66rem; background: var(--muted); flex: 0 0 auto; }
+  .badge.present { border-color: var(--red); color: var(--red); }
+  .badge.present .dot { background: var(--red); }
+  .badge.absent { border-color: var(--ink); color: var(--ink); }
+  .badge.absent .dot { background: var(--ink); border-radius: 50%; }
 
-  .metrics { font-family: var(--mono); font-size: 0.76rem; border: 1px solid var(--line); border-radius: 5px; }
-  .metrics div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.5rem 0.8rem; border-top: 1px solid var(--line); }
+  .metrics { font-family: var(--mono); font-size: 0.72rem; border: 2px solid var(--line); }
+  .metrics div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.5rem 0.8rem; border-top: 1px solid var(--hair); }
   .metrics div:first-child { border-top: 0; }
-  .metrics .k { color: var(--muted); }
+  .metrics .k { color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .metrics .v { color: var(--ink); text-align: right; }
-  .dropzone.drag { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -79,9 +88,9 @@
           <a href="demo.html" class="here">Demo</a>
           <a href="https://github.com/JimothyJohn/tensor-factory">GitHub ↗</a>
         </nav>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
-          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
-          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.3 6.3 0 0 0 9.5 9.5z"/></svg>
         </button>
       </div>
     </div>
@@ -89,7 +98,7 @@
 
   <header class="col doc-head">
     <p class="kicker">Live demo</p>
-    <h1>The detector, <em>in your browser</em>.</h1>
+    <h1>The detector,<br /><em>in your browser</em>.</h1>
     <p class="lede">
       An 80&nbsp;KB int8 ONNX model running on WebAssembly — the same model the CLI runs,
       no server and no upload. Your image never leaves the page.
@@ -99,22 +108,26 @@
   <div class="col" style="padding-bottom: clamp(3rem, 8vh, 5rem);">
     <div class="demo-grid">
 
-      <div class="stage" id="stage">
-        <canvas id="canvas" width="480" height="480" aria-label="detection result"></canvas>
-        <div class="placeholder" id="placeholder">loading model + sample…</div>
-        <div class="spin" aria-hidden="true"></div>
+      <div>
+        <div class="stage" id="stage">
+          <canvas id="canvas" width="480" height="480" aria-label="detection result"></canvas>
+          <div class="placeholder" id="placeholder">loading model + sample…</div>
+          <div class="spin" aria-hidden="true"></div>
+        </div>
+        <div class="stage-cap"><span>Specimen · 480 × 480 px</span><span>Fig. 01</span></div>
       </div>
 
       <div class="controls">
-        <div>
-          <div class="seg" role="group" aria-label="model">
-            <button type="button" id="m-mock" aria-pressed="true">Mock</button>
-            <button type="button" id="m-presence" aria-pressed="false">Presence</button>
-          </div>
+        <span class="ctl-label">Model</span>
+        <div class="seg" role="group" aria-label="model">
+          <button type="button" id="m-mock" aria-pressed="true">Mock</button>
+          <button type="button" id="m-presence" aria-pressed="false">Presence</button>
         </div>
 
+        <span class="ctl-label">Verdict</span>
         <div id="status" class="badge"><span class="dot"></span><span id="status-text">—</span></div>
 
+        <span class="ctl-label">Readout</span>
         <div class="metrics" id="metrics">
           <div><span class="k">box (norm)</span><span class="v" id="m-norm">—</span></div>
           <div><span class="k">box (px @480)</span><span class="v" id="m-px">—</span></div>
@@ -167,19 +180,18 @@
   </footer>
 
   <script>
-    // theme toggle (shared with the rest of the site)
     (function () {
       var root = document.documentElement, btn = document.getElementById("theme-toggle");
       function sync() {
-        var light = root.getAttribute("data-theme") === "light";
-        btn.setAttribute("aria-label", light ? "Switch to dark mode" : "Switch to light mode");
-        btn.setAttribute("aria-pressed", String(light));
+        var dark = root.getAttribute("data-theme") === "dark";
+        btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+        btn.setAttribute("aria-pressed", String(dark));
       }
       sync();
       btn.addEventListener("click", function () {
-        var light = root.getAttribute("data-theme") === "light";
-        if (light) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "light");
-        try { localStorage.setItem("tf-theme", light ? "dark" : "light"); } catch (e) {}
+        var dark = root.getAttribute("data-theme") === "dark";
+        if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+        try { localStorage.setItem("tf-theme", dark ? "light" : "dark"); } catch (e) {}
         sync();
       });
     })();
@@ -220,6 +232,10 @@
     // is plenty and runs anywhere.
     ort.env.wasm.numThreads = 1;
 
+    function cssVar(name, fallback) {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    }
     function showError(msg) { els.errText.textContent = msg; els.err.hidden = false; els.placeholder.style.display = "none"; }
     function busy(on) { els.stage.classList.toggle("busy", on); }
     var clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
@@ -253,18 +269,18 @@
       return { idx: bi, score: ex[bi] / s };
     }
 
-    // Draw the 480px square the model sees, then overlay the predicted box.
+    // Draw the 480px square the model sees, then overlay the predicted box in the accent red.
     function render(srcCanvas, box, label, color) {
       var ctx = els.canvas.getContext("2d");
       ctx.clearRect(0, 0, SIZE, SIZE);
       ctx.drawImage(srcCanvas, 0, 0, SIZE, SIZE);
       var x = box[0] * SIZE, y = box[1] * SIZE, w = (box[2] - box[0]) * SIZE, h = (box[3] - box[1]) * SIZE;
-      ctx.lineWidth = 3; ctx.strokeStyle = color; ctx.strokeRect(x, y, w, h);
+      ctx.lineWidth = 4; ctx.strokeStyle = color; ctx.strokeRect(x, y, w, h);
       if (label) {
-        ctx.font = "600 15px 'Spline Sans Mono', monospace";
+        ctx.font = "700 14px 'Space Mono', monospace";
         var tw = ctx.measureText(label).width;
-        ctx.fillStyle = color; ctx.fillRect(x, Math.max(0, y - 22), tw + 12, 22);
-        ctx.fillStyle = "#14120d"; ctx.fillText(label, x + 6, Math.max(15, y - 6));
+        ctx.fillStyle = color; ctx.fillRect(x - 2, Math.max(0, y - 22), tw + 14, 22);
+        ctx.fillStyle = "#f6f1e9"; ctx.fillText(label, x + 5, Math.max(15, y - 6));
       }
       els.placeholder.style.display = "none";
     }
@@ -291,21 +307,19 @@
         var box = [clamp01(raw[0]), clamp01(raw[1]), clamp01(raw[2]), clamp01(raw[3])];
         var u8 = box.map(q8);
 
-        var color = "var(--accent)", label = "", present = null, name = null, score = null;
+        var RED = cssVar("--red", "#e1261c"), INK = cssVar("--ink", "#15140f");
+        var label = "", present = null, name = null, score = null;
         var model = MODELS[active];
         if (out["logits"] && model.classes) {
           var r = softmaxArgmax(out["logits"].data);
           name = model.classes[r.idx]; score = r.score; present = name !== "background";
-          label = name + " " + (score * 100).toFixed(0) + "%";
-          color = present ? "#58c08f" : "#d8a657";
+          label = name.toUpperCase() + " " + (score * 100).toFixed(0) + "%";
         } else {
-          label = "box"; color = "#58c08f";
+          label = "DETECTION";
         }
-        // resolve the CSS var to a concrete color for canvas
-        color = present === false ? "#d8a657" : "#58c08f";
+        var color = present === false ? INK : RED;
         render(src, box, label, color);
 
-        // status badge
         els.status.className = "badge" + (present === true ? " present" : present === false ? " absent" : "");
         els.statusText.textContent = present === null ? "box only (no presence head)"
           : present ? ("present — helicoil " + (score * 100).toFixed(0) + "%")
@@ -334,16 +348,14 @@
       document.getElementById("m-presence").setAttribute("aria-pressed", String(key === "presence"));
     }
 
-    // wiring
     document.getElementById("m-mock").addEventListener("click", function () { setModel("mock"); loadSample(); });
     document.getElementById("m-presence").addEventListener("click", function () { setModel("presence"); });
     document.getElementById("btn-upload").addEventListener("click", function () { els.file.click(); });
     document.getElementById("btn-sample").addEventListener("click", loadSample);
     els.file.addEventListener("change", function (e) {
       var file = e.target.files && e.target.files[0]; if (!file) return;
-      var url = URL.createObjectURL(file); loadImage(url);
+      loadImage(URL.createObjectURL(file));
     });
-    // drag & drop onto the stage
     ["dragover", "dragenter"].forEach(function (ev) {
       els.stage.addEventListener(ev, function (e) { e.preventDefault(); els.stage.classList.add("drag"); });
     });
@@ -357,7 +369,6 @@
 
     function loadSample() { setModel("mock"); loadImage("sample-helicoil.png"); }
 
-    // run once on load: mock model on the synthetic sample -> instant detection
     loadSample();
   })();
   </script>
