@@ -33,7 +33,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["packages"]
+testpaths = ["packages", "tests"]
 markers = [
     "unit: fast, isolated unit tests",
     "integration: tests that touch real external resources",
