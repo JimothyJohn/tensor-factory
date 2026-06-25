@@ -14,7 +14,7 @@ from typing import Any
 from tensor_factory.inference import Detector
 from tensor_factory.inference import benchmark as _benchmark
 
-DEFAULT_MODEL_NAME = "helicoil-presence-v5.onnx"
+DEFAULT_MODEL_NAME = "helicoil-presence-cam-v1.onnx"
 DEFAULT_INPUT_SIZE = 480
 # A presence-head model returns a box only when sigmoid(objectness) clears this. Below it,
 # the detection is "nothing here" -- no box at all, the YOLO-style no-object case.

@@ -15,13 +15,18 @@ throughout (zero AGPL exposure — no Ultralytics).
 
 Five-package workspace, full pipeline working end to end: **204 fps CPU @480px, 81 KB int8
 model**. Architecture/throughput numbers hold across models; the ~1.9 px localization
-figure is on **mock** data (exact geometry). On real photoreal data, box localization is
-~25 px (the open quality ceiling — see [`TODO.md`](TODO.md)).
+figure is on **mock** data (exact geometry). On synthetic photoreal data box localization
+is ~25 px; on **real microscope camera footage** (the bundled `cam-v1`) it's ~34 px — the
+open quality ceiling (see [`TODO.md`](TODO.md)).
 
-- **The bundled MCP model is now `helicoil-presence-v5.onnx`** (real data + YOLO-style
-  objectness/presence head + the soft-argmax gain) — promoted from the synthetic
-  `helicoil-mock-v1.onnx`, which is still bundled alongside it (box-only, selectable via
-  `model_path`). Other real-data models live gitignored under `examples/helicoils/images/`.
+- **The bundled MCP model is now `helicoil-presence-cam-v1.onnx`** — the first detector
+  trained on *actual microscope camera frames* (extracted from `helicoils.mp4`: 131
+  human-validated positives + 81 reviewed-empty real negatives), carrying the YOLO-style
+  objectness/presence head + the soft-argmax gain. Held-out (80/20): **~34 px box
+  center-error, 98% presence accuracy**, 81 KB int8, ~190 fps CPU @480px. The synthetic
+  `helicoil-mock-v1.onnx` is still bundled alongside it (box-only, selectable via
+  `model_path`); earlier synthetic/photoreal models (v1–v5) live gitignored under
+  `examples/helicoils/images/`.
 - **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
@@ -41,9 +46,11 @@ figure is on **mock** data (exact geometry). On real photoreal data, box localiz
   API call, no local GPU, reads `GEMINI_API_KEY`. `build_ds.py <out> <n> <reference>` can
   condition generation on a real part photo for application-matched realism. **Merged to
   the base branch `master`** (this repo's default branch is `master`, not `main`).
-- **Datasets** (all gitignored under `examples/helicoils/images/`): `real_ds` (110
-  human-validated positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-
-  labeled), `negatives_pool` (110 negatives), `real_ds_combined` (278, used to train v3).
+- **Datasets** (all gitignored under `examples/helicoils/images/`): `real` (131
+  real-camera positives from `helicoils.mp4` frames + `real_neg`, its 81 reviewed-empty
+  real negatives — trains the bundled `cam-v1`), `real_ds` (110 human-validated synthetic
+  positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-labeled),
+  `negatives_pool` (110 synthetic negatives), `real_ds_combined` (278, used to train v3).
 - **Human-review gate is optional.** Training enforces `review=approved` by default, but
   `--allow-unreviewed` trains straight on GroundingDINO labels — the fast path (QC a
   contact-sheet instead of hand-correcting every box). The prompt system + QC samples are

@@ -33,12 +33,12 @@ def html() -> str:
 def test_demo_assets_exist():
     assert DEMO.is_file()
     assert (DEMO_MODELS / "helicoil-mock-v1.onnx").is_file()
-    assert (DEMO_MODELS / "helicoil-presence-v5.onnx").is_file()
+    assert (DEMO_MODELS / "helicoil-presence-cam-v1.onnx").is_file()
     assert (DOCS / "sample-helicoil.png").is_file()
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", ["helicoil-mock-v1.onnx", "helicoil-presence-v5.onnx"])
+@pytest.mark.parametrize("name", ["helicoil-mock-v1.onnx", "helicoil-presence-cam-v1.onnx"])
 def test_demo_models_match_the_bundled_package_models(name):
     # The demo must serve byte-identical models to what tensor-factory-mcp bundles -- not a
     # stale copy that quietly diverges from the shipped detector.
@@ -47,7 +47,7 @@ def test_demo_models_match_the_bundled_package_models(name):
 
 @pytest.mark.unit
 def test_demo_models_load_and_satisfy_the_contract():
-    for name in ("helicoil-mock-v1.onnx", "helicoil-presence-v5.onnx"):
+    for name in ("helicoil-mock-v1.onnx", "helicoil-presence-cam-v1.onnx"):
         det = Detector(DEMO_MODELS / name, input_size=SIZE)
         box = det.detect_box(Image.new("RGB", (SIZE, SIZE), (128, 128, 128)))
         assert 0.0 <= box.x1 <= 1.0 and box.x1 <= box.x2
@@ -74,7 +74,7 @@ def test_bundled_sample_is_detected_by_the_mock_model():
 def test_demo_presence_model_has_presence_head_and_no_class_metadata():
     # The presence model is YOLO-style: it exposes a "presence" output (one objectness
     # logit) and carries no class names -- absence is the low tail of one score, not a class.
-    det = Detector(DEMO_MODELS / "helicoil-presence-v5.onnx", input_size=SIZE)
+    det = Detector(DEMO_MODELS / "helicoil-presence-cam-v1.onnx", input_size=SIZE)
     assert det.has_presence, "presence model must expose a 'presence' output"
     score = det.detect_presence(Image.new("RGB", (SIZE, SIZE), (128, 128, 128)))
     assert 0.0 <= score <= 1.0
@@ -97,7 +97,7 @@ def test_demo_thresholds_presence_with_a_sigmoid(html):
 def test_demo_references_runtime_and_assets(html):
     assert "onnxruntime-web" in html  # WASM runtime
     assert "models/helicoil-mock-v1.onnx" in html
-    assert "models/helicoil-presence-v5.onnx" in html
+    assert "models/helicoil-presence-cam-v1.onnx" in html
     assert "sample-helicoil.png" in html
     assert "<canvas" in html and 'id="file"' in html  # the interactive surface
 

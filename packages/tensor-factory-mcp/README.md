@@ -2,7 +2,7 @@
 
 An MCP server that exposes a tensor-factory detector as tools over stdio — plus a
 lightweight HTTP endpoint for callers that just want JSON over HTTP. Ships with a bundled
-int8 model (`helicoil-presence-v5.onnx`, real-data detector with a presence head) so it
+int8 model (`helicoil-presence-cam-v1.onnx`, real-camera detector with a presence head) so it
 works with zero setup; the synthetic box-only demo (`helicoil-mock-v1.onnx`) is bundled
 too and selectable via `model_path`.
 
