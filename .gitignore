@@ -32,3 +32,6 @@ images/
 
 # Public validation datasets (downloaded, not redistributed) — Oxford-IIIT Pet etc.
 examples/pets-validation/data/
+
+# Source videos (large, user-supplied microscope clips; frames are extracted, not the clip)
+*.mp4
