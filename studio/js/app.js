@@ -8,6 +8,7 @@ import { CanvasEditor } from "./canvas.js";
 import { installKeymap, renderKeymapHelp } from "./keymap.js";
 import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
+import { Trainer } from "./trainer.js";
 
 const PALETTE = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa"];
 const DEFAULT_CLASSES = [{ name: "object", color: PALETTE[0] }];
@@ -58,7 +59,9 @@ async function saveWorking(review) {
 
 // --- navigation ------------------------------------------------------------
 async function go(delta, { commit = null } = {}) {
+  const fid = currentFrame()?.id;
   await saveWorking(commit);
+  if (fid != null && (commit === "approved" || commit === "negative")) pushSample(fid);
   const n = state.frames.length;
   if (!n) return;
   state.index = (state.index + delta + n) % n;
@@ -66,6 +69,7 @@ async function go(delta, { commit = null } = {}) {
 }
 
 async function loadCurrent() {
+  setAuto("");
   const f = currentFrame();
   if (!f) {
     state.bitmap = null;
@@ -77,6 +81,7 @@ async function loadCurrent() {
   const label = currentLabel();
   editor.setFrame(state.bitmap, label.boxes);
   renderStatus();
+  autoLabel();
 }
 
 // --- class selection -------------------------------------------------------
@@ -177,8 +182,127 @@ async function doExport() {
   }
 }
 
+// --- trainer integration ---------------------------------------------------
+// Build the single-object training sample for a frame, or null if not approved.
+function sampleFor(frameId) {
+  const f = state.frames.find((fr) => fr.id === frameId);
+  const l = state.labels.get(frameId);
+  if (!f || !l || l.review !== "approved") return null;
+  const present = l.present && l.boxes.length ? 1 : 0;
+  const b = present ? l.boxes[0] : null;
+  return { frameId, blob: f.blob, box: b ? [b.x1, b.y1, b.x2, b.y2] : null, present };
+}
+
+function pushSample(frameId) {
+  if (!trainer) return;
+  const s = sampleFor(frameId);
+  if (s) trainer.upsert([s]);
+}
+
+// Ask the trainer to pre-fill an unlabeled frame with its prediction.
+async function autoLabel() {
+  const f = currentFrame();
+  if (!trainer || !trainer.ready || !f) return;
+  const label = currentLabel();
+  if (label.review === "approved" || editor.getBoxes().length) return;
+  const fid = f.id;
+  const pred = await trainer.predict(fid, f.blob);
+  const cur = currentFrame();
+  if (!cur || cur.id !== fid) return; // navigated away
+  if (currentLabel().review === "approved" || editor.getBoxes().length) return;
+  if (pred.present) {
+    const [x1, y1, x2, y2] = pred.box;
+    editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls: state.activeClass }]);
+    setAuto(`auto-label · score ${pred.score.toFixed(2)} · Space to accept, drag to fix`);
+  } else {
+    setAuto(`model sees no object · score ${pred.score.toFixed(2)} · C to confirm empty`);
+  }
+}
+
+function setAuto(text) {
+  $("autoBadge").textContent = text || "";
+}
+
+function fmtPx(v) {
+  return v == null ? "—" : `${v.toFixed(1)} px`;
+}
+
+function renderMetrics(m) {
+  $("backendTag").textContent = m.backend || "";
+  const errEl = $("mErr");
+  errEl.textContent = fmtPx(m.err);
+  $("mBest").textContent = fmtPx(m.bestErr === Infinity ? null : m.bestErr);
+  $("mBaseline").textContent = fmtPx(m.baseline);
+  // does the model beat the constant-predictor floor?
+  errEl.className = m.baseline == null ? "" : m.err < m.baseline ? "beats" : "loses";
+  $("mPresence").textContent = m.presenceAcc == null ? "—" : `${(m.presenceAcc * 100).toFixed(0)}%`;
+  $("mGain").textContent = m.gain == null ? "—" : m.gain.toFixed(2);
+  $("mEpoch").textContent = `${m.epoch} · ${m.trainCount}t/${m.valCount}v`;
+  renderGuardrail(m);
+  drawSparkline(m.history, m.bestErr, m.baseline);
+}
+
+function renderGuardrail(m) {
+  const el = $("guardrail");
+  if (m.regressed) {
+    el.className = "guardrail alert";
+    el.innerHTML =
+      `⚠ regression: ${m.err.toFixed(1)}px vs best ${m.bestErr.toFixed(1)}px — serving best checkpoint. ` +
+      `Likely-bad labels: `;
+    m.suspects.forEach((s, i) => {
+      const a = document.createElement("span");
+      a.className = "suspect";
+      a.textContent = `#${s.frameId}${i < m.suspects.length - 1 ? ", " : ""}`;
+      a.onclick = () => jumpToFrame(s.frameId);
+      el.appendChild(a);
+    });
+  } else {
+    el.className = "guardrail";
+    el.textContent = "";
+  }
+}
+
+function jumpToFrame(frameId) {
+  const i = state.frames.findIndex((f) => f.id === frameId);
+  if (i >= 0) {
+    saveWorking().then(() => {
+      state.index = i;
+      loadCurrent();
+    });
+  }
+}
+
+function drawSparkline(history, best, baseline) {
+  const cv = $("sparkline");
+  const ctx = cv.getContext("2d");
+  const W = cv.width;
+  const H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!history || history.length < 2) return;
+  const vals = baseline != null ? [...history, baseline] : history;
+  const max = Math.max(...vals) * 1.05;
+  const min = 0;
+  const y = (v) => H - 4 - ((v - min) / (max - min || 1)) * (H - 8);
+  const x = (i) => 2 + (i / (history.length - 1)) * (W - 4);
+  if (baseline != null) {
+    ctx.strokeStyle = "#7b8a9e";
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(2, y(baseline));
+    ctx.lineTo(W - 2, y(baseline));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = "#4ade80";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  history.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
+  ctx.stroke();
+}
+
 // --- boot ------------------------------------------------------------------
 let editor;
+let trainer;
 
 async function main() {
   state.store = await Store.create();
@@ -194,6 +318,28 @@ async function main() {
     },
   );
   editor.setClasses(state.classes);
+
+  trainer = new Trainer({
+    onReady: (m) => {
+      $("backendTag").textContent = m.backend;
+      trainer.resume();
+    },
+    onMetrics: renderMetrics,
+    onStatus: (text) => {
+      const el = $("guardrail");
+      el.className = "guardrail";
+      el.textContent = text;
+    },
+    onError: (text) => {
+      $("ingestStatus").textContent = "trainer error: " + text;
+    },
+  });
+  const qp = new URLSearchParams(location.search);
+  trainer.init({
+    size: parseInt(qp.get("size"), 10) || 192,
+    width: parseInt(qp.get("width"), 10) || 12,
+    batch: parseInt(qp.get("batch"), 10) || 8,
+  });
 
   renderClasses();
   renderKeymapHelp($("keymapHelp"));
@@ -227,9 +373,32 @@ async function main() {
     e.target.value = "";
   });
   $("exportBtn").addEventListener("click", doExport);
+  $("exportModelBtn").addEventListener("click", async () => {
+    if (!trainer?.ready) return;
+    const w = await trainer.exportWeights();
+    const blob = new Blob([JSON.stringify(w)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "tinydetector-weights.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    const best = w.meta.bestErr === Infinity || w.meta.bestErr == null ? "n/a" : `${w.meta.bestErr.toFixed(1)}px`;
+    $("ingestStatus").textContent = `model exported (best val err ${best})`;
+  });
+  $("pauseBtn").addEventListener("click", () => {
+    if (trainer.running) {
+      trainer.pause();
+      $("pauseBtn").textContent = "Resume training";
+    } else {
+      trainer.resume();
+      $("pauseBtn").textContent = "Pause training";
+    }
+  });
   $("clearBtn").addEventListener("click", async () => {
     if (!confirm("Wipe all frames and labels from this session?")) return;
     await state.store.clearAll();
+    trainer.reset();
+    setAuto("");
     state.index = 0;
     await refreshFrames();
     await loadCurrent();
@@ -237,6 +406,15 @@ async function main() {
   });
 
   await refreshFrames();
+  // feed any already-approved labels (e.g. from a prior session) to the trainer
+  const approved = [];
+  for (const l of state.labels.values()) {
+    if (l.review === "approved") {
+      const s = sampleFor(l.frameId);
+      if (s) approved.push(s);
+    }
+  }
+  trainer.upsert(approved);
   await loadCurrent();
 }
 

@@ -17,6 +17,7 @@
         <label class="field">fps <input id="fpsInput" type="number" min="0.1" step="0.1" value="1" /></label>
         <label class="field">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="6" /></label>
         <button class="btn" id="exportBtn">Export dataset</button>
+        <button class="btn" id="exportModelBtn">Export model</button>
         <button class="btn ghost" id="clearBtn">Clear session</button>
       </div>
     </header>
@@ -33,6 +34,7 @@
           <span id="stateBadges"></span>
           <span id="counts" class="counts"></span>
         </div>
+        <p id="autoBadge" class="auto-badge"></p>
         <p id="ingestStatus" class="ingest-status"></p>
       </section>
 
@@ -43,10 +45,19 @@
         </div>
 
         <div class="block">
-          <h2>Trainer</h2>
-          <div class="trainer-placeholder">
-            Continuous in-browser WebGPU training, live val metrics, and the
-            keep-best guardrail arrive in slice 2. Label now — the dataset persists.
+          <h2>Trainer <small id="backendTag">starting…</small></h2>
+          <div class="trainer">
+            <canvas id="sparkline" width="292" height="64"></canvas>
+            <div class="metrics">
+              <div class="metric"><span>val center-err</span><b id="mErr">—</b></div>
+              <div class="metric"><span>best</span><b id="mBest">—</b></div>
+              <div class="metric"><span>baseline floor</span><b id="mBaseline">—</b></div>
+              <div class="metric"><span>presence acc</span><b id="mPresence">—</b></div>
+              <div class="metric"><span>soft-argmax gain</span><b id="mGain">—</b></div>
+              <div class="metric"><span>epoch · data</span><b id="mEpoch">—</b></div>
+            </div>
+            <div id="guardrail" class="guardrail"></div>
+            <button class="btn ghost" id="pauseBtn">Pause training</button>
           </div>
         </div>
 

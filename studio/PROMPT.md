@@ -151,12 +151,20 @@ the model converge and immediately feel the cost of a bad label.
 - Replacing `tensor-factory-train` as the reference trainer — it stays the oracle for
   parity/regression tests against the in-browser implementation.
 
-## Open questions to resolve in build
+## Resolved in build
 
-- In-browser training vehicle: tfjs-WebGPU (faster to working) vs hand-rolled WGSL
-  (dependency-light, matches the repo's zero-dep-core ethos). Lean toward proving the loop
-  with tfjs, then deciding whether WGSL is worth it.
-- Train/val split inside the browser, and how the guardrail's "which samples caused the
-  regression" attribution is computed cheaply.
-- Whether Studio lives at repo root (`studio/`, as here) or graduates into a packaged form
-  once shape settles.
+- **Training vehicle: TensorFlow.js**, vendored under `vendor/` (Apache-2.0), backend
+  `webgpu → webgl → cpu`. Chosen over hand-rolled WGSL: real autograd ships a *correct*
+  loop now; WGSL backprop stays a possible future optimization, not a prerequisite. The
+  model (`js/trainer.worker.js`) mirrors `TinyDetector` — stride-2 conv stack → 4-channel
+  edge heatmap → marginal soft-argmax with a learnable gain → xyxy, plus a global-pool
+  presence logit; box loss masked to positives, BCE on presence.
+- **Train/val split:** deterministic ~20% by insertion order (independent of the IndexedDB
+  id base). **Regression attribution:** when val err exceeds the best by >25%, the worker
+  ranks approved positives by current box loss and surfaces the worst few as likely-bad
+  labels (clickable to jump to the frame).
+- **Final int8 ONNX** still comes from `tensor-factory-train` on the exported COCO (the
+  proven path behind the bundled models); the browser model is the live auto-labeler +
+  feedback. Studio also exports its raw weights (`TinyDetector`-keyed JSON). In-browser
+  int8-ONNX quantization is intentionally out of scope.
+- **Location:** lives at repo root (`studio/`); revisit packaging once the shape settles.
