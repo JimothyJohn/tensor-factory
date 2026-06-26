@@ -11,6 +11,8 @@ unvalidated labels).
 from __future__ import annotations
 
 import json
+import statistics
+from collections.abc import Sequence
 from pathlib import Path
 
 from tensor_factory.formats import from_coco_bbox
@@ -73,6 +75,38 @@ def load_coco_labeled(
         box = from_coco_bbox(ann["bbox"], width=im["width"], height=im["height"])
         items.append((root / im["file_name"], box, label_of[ann["category_id"]]))
     return items, names
+
+
+def baseline_center_err(
+    train_items: Sequence[tuple[Path, BBox | None]],
+    val_items: Sequence[tuple[Path, BBox | None]],
+    size: int,
+) -> float | None:
+    """Median center error (px) of the *constant predictor*: always emit the mean
+    training-box center, ignoring the image entirely. The floor any real localizer must beat.
+
+    A model scoring at or above this isn't localizing -- it's riding center-bias (the
+    soft-argmax marginal expectation collapses toward the frame center when the heatmap is
+    diffuse). Reported next to the model's val error so the two can never be confused: in
+    ``examples/pets-validation`` a 61px model sat *above* its ~60px baseline -- i.e. learned
+    no localization -- while a superficially-trained loss curve hid it. The constant is fit
+    on the *train* split and scored on *val*, matching the model's own train/val protocol.
+
+    Returns None when either split has no box-bearing item (no comparison possible). Items
+    may carry ``None`` boxes (negatives); those are skipped.
+    """
+
+    def center(b: BBox) -> tuple[float, float]:
+        return (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
+
+    train_c = [center(b) for _, b in train_items if b is not None]
+    val_c = [center(b) for _, b in val_items if b is not None]
+    if not train_c or not val_c:
+        return None
+    mcx = sum(cx for cx, _ in train_c) / len(train_c)
+    mcy = sum(cy for _, cy in train_c) / len(train_c)
+    errs = [((mcx - cx) ** 2 + (mcy - cy) ** 2) ** 0.5 * size for cx, cy in val_c]
+    return statistics.median(errs)
 
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}

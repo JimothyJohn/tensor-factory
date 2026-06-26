@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import
 
 from tensor_factory.review import review_summary
 
-from .data import load_coco_boxes, load_negatives
+from .data import baseline_center_err, load_coco_boxes, load_negatives
 from .model import TinyDetector
 
 
@@ -241,6 +241,12 @@ def fit(
         raise ValueError(f"no annotations found under {data_dir}")
 
     train_items, val_items = _split(items, val_frac, seed)
+    # Constant-predictor floor: median val center-error of "always emit the mean train box".
+    # A model that can't beat this isn't localizing -- it's riding center-bias. Printed up
+    # front and again as a verdict so a good-looking loss curve can't disguise a non-localizer.
+    baseline_err = baseline_center_err(train_items, val_items, size)
+    if baseline_err is not None:
+        print(f"baseline: constant-predictor val err {baseline_err:.1f}px (the floor to beat)")
     # Seed torch so weight init is reproducible run-to-run -- the split is already seeded, so
     # with this the only variable between two runs is the hyperparameters (e.g. the gain).
     torch.manual_seed(seed)
@@ -256,6 +262,7 @@ def fit(
     presence_loss = nn.BCEWithLogitsLoss()
 
     best_score = float("-inf")
+    best_err: float | None = None
     best_state: dict | None = None
     model.train()
     for epoch in range(epochs):
@@ -292,6 +299,7 @@ def fit(
             line += f"  | val err {err:.1f}px" + (f" acc {acc:.0%}" if acc is not None else "")
             if score > best_score:
                 best_score = score
+                best_err = err
                 best_state = copy.deepcopy(model.state_dict())
                 line += "  *best"
         print(line)
@@ -301,5 +309,17 @@ def fit(
         if presence:
             err, acc = _val_metrics(model, val_items, size, dev, presence=presence)
             print(f"BEST checkpoint: val err {err:.1f}px  presence acc {acc:.0%}")
+    # Verdict: does the model actually localize, or just match the do-nothing constant?
+    if baseline_err is not None and best_err is not None:
+        if best_err < baseline_err:
+            verdict = f"{(1 - best_err / baseline_err) * 100:.0f}% better -- localizing"
+        else:
+            verdict = (
+                f"NOT better ({best_err / baseline_err - 1:+.0%}) -- center-bias, not localizing"
+            )
+        print(
+            f"localization: model {best_err:.1f}px vs constant-predictor "
+            f"{baseline_err:.1f}px  ->  {verdict}"
+        )
     print(f"soft-argmax gain: {float(model.log_gain.exp()):.2f} (1.0 = plain softmax)")
     return export_onnx(model, out_path, size=size)
