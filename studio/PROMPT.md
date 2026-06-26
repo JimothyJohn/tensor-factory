@@ -1,6 +1,6 @@
 # Tensor Factory Studio — design brief
 
-> The vision and the hard decisions for the active-learning labeling + in-browser
+> The vision and the hard decisions for the active-learning labeling + continuous
 > training loop. Same role for Studio that [`examples/helicoils/PROMPT.md`](../examples/helicoils/PROMPT.md)
 > plays for the first example: this is where the *spirit* lives, ahead of the code.
 
@@ -49,16 +49,17 @@ better (or worse) as you label.
 
 ## Hard decisions (locked)
 
-1. **Browser-only. WebGPU.** No Python backend. Training, inference, dedup, and storage all
-   run in the browser. Data lives in IndexedDB; the model trains on the WebGPU backend.
-   - *Why this is even possible:* the model is tiny — a handful of conv layers + a
-     soft-argmax coordinate head + a presence logit. In-browser autograd can handle it in
-     seconds/epoch. This would be a non-starter for a 30 M-param transformer.
-   - *The tradeoff, on record:* we give up the mature torch/MPS training path
-     (`tensor-factory-train`) and re-implement forward+backward for the tiny net in the
-     browser (realistically tfjs-WebGPU, or hand-rolled WGSL compute shaders to stay
-     dependency-light). The Python trainer stays the reference/oracle for parity tests.
-   - *Bonus already claimed:* "just needs a browser" — open the page, drop a video, label.
+1. **Browser UI + local Python backend.** The browser does ingest, the canvas, and labeling;
+   a local backend (`tensor-factory-studio`) owns the on-disk dataset and trains on the GPU.
+   - *History:* this was first built browser-only with in-browser WebGPU/tfjs training. That
+     ran (and is in the git history), but WebGPU fell back to CPU in headless verification,
+     tfjs was a standing exception to the repo's Python/Rust stack, and the in-browser model
+     was *not* the deployable artifact. We pivoted to the backend approach.
+   - *Why the backend wins here:* it reuses the trusted `tensor_factory_train.fit` (torch on
+     MPS/CUDA), so the model the UI trains **is** the canonical int8 ONNX — no parity gap. It
+     trains for real on the GPU, and the whole loop is verifiable locally end to end.
+   - *Cost:* no longer "just a browser" — you run `uv run tensor-factory-studio` first. Worth
+     it for a correct, deployable model over a portable-but-divergent one.
 
 2. **Continuous background retraining.** The trainer runs in a Web Worker on a loop over the
    current labeled set, not on a button. New labels are picked up on the next epoch.
@@ -127,13 +128,14 @@ zero-dep starting point.
 
 ## Persistence & export
 
-- Everything (frames, labels, model checkpoints, metric history) lives in **IndexedDB** so a
-  session survives a reload with zero setup.
-- **Export** produces the exact on-disk layout the rest of tensor-factory already reads —
-  `annotations.coco.json` + `images/`, every box stamped `review=approved` / `source=human`
-  so it's trainable, presence carried via empty-frame samples — plus the trained **int8
-  ONNX** model. A Studio session drops straight into `tensor-factory-train`, the `detect`
-  CLI, and the MCP/HTTP serving surfaces with no conversion step.
+- The **browser** keeps frames + labels in **IndexedDB** so the UI survives a reload; the
+  **backend** owns the source-of-truth dataset and the trained checkpoints on disk.
+- The backend writes the exact layout the rest of tensor-factory reads —
+  `annotations.coco.json` + `images/` (+ `negatives/images/`), every box stamped
+  `review=approved` / `source=human`, presence carried via empty-frame samples — and the
+  trained **int8 ONNX** alongside. So the dataset and the deployable model drop straight into
+  `tensor-factory-train`, the `detect` CLI, and the MCP/HTTP serving surfaces with no
+  conversion step. The browser's *Export dataset* also writes the same COCO layout client-side.
 
 ## Real-time feedback
 
@@ -145,26 +147,28 @@ the model converge and immediately feel the cost of a bad label.
 ## Non-goals (for now)
 
 - Multi-user / collaborative labeling. Single operator, single machine.
-- Cloud training or a hosted backend. If a GPU box is wanted later it's an *optimization*,
-  not the architecture.
+- Cloud / hosted training. The backend is local-only (`127.0.0.1`); a remote GPU box would
+  be a later optimization, not the architecture.
 - Segmentation masks, keypoints, tracking. Boxes + class only.
-- Replacing `tensor-factory-train` as the reference trainer — it stays the oracle for
-  parity/regression tests against the in-browser implementation.
+- Warm-started incremental training. Each round retrains from scratch via `fit` (fast for a
+  tiny model, and robust against drift); warm-start is a possible later optimization.
 
 ## Resolved in build
 
-- **Training vehicle: TensorFlow.js**, vendored under `vendor/` (Apache-2.0), backend
-  `webgpu → webgl → cpu`. Chosen over hand-rolled WGSL: real autograd ships a *correct*
-  loop now; WGSL backprop stays a possible future optimization, not a prerequisite. The
-  model (`js/trainer.worker.js`) mirrors `TinyDetector` — stride-2 conv stack → 4-channel
-  edge heatmap → marginal soft-argmax with a learnable gain → xyxy, plus a global-pool
-  presence logit; box loss masked to positives, BCE on presence.
-- **Train/val split:** deterministic ~20% by insertion order (independent of the IndexedDB
-  id base). **Regression attribution:** when val err exceeds the best by >25%, the worker
-  ranks approved positives by current box loss and surfaces the worst few as likely-bad
-  labels (clickable to jump to the frame).
-- **Final int8 ONNX** still comes from `tensor-factory-train` on the exported COCO (the
-  proven path behind the bundled models); the browser model is the live auto-labeler +
-  feedback. Studio also exports its raw weights (`TinyDetector`-keyed JSON). In-browser
-  int8-ONNX quantization is intentionally out of scope.
-- **Location:** lives at repo root (`studio/`); revisit packaging once the shape settles.
+- **Training vehicle: `tensor_factory_train.fit` (torch), run by a backend thread.** Reused
+  wholesale via a small additive `on_epoch` hook added to `fit` — so the live loop and the
+  CLI share one trained, exported int8 ONNX. Continuous retrain whenever new labels arrive;
+  device resolves `cuda → mps → cpu`.
+- **Dataset lives server-side** at `<data-dir>/annotations.coco.json` (+ `images/` and
+  `negatives/images/`), exactly the layout `fit` reads — positives stamped
+  `review=approved`/`source=human`, empty frames as the presence head's negatives. The
+  browser keeps an IndexedDB copy for UI state and pushes approved frames to `POST /samples`.
+- **Keep-best guardrail:** a round's checkpoint is promoted to the served model only if its
+  best val center-error beats the global best; otherwise the previous model stays live and
+  the round is flagged a regression with the most-recently-added sample ids as suspects.
+- **Auto-label** is the served best model via `POST /predict` (the real `Detector`
+  inference path); the browser pre-fills the box and you accept with `Space`.
+- **Serving surfaces:** `tensor-factory-studio` is a stdlib `http.server` (no web framework),
+  binds `127.0.0.1`, and mirrors the shape of `tensor-factory-http`.
+- **Location:** UI at repo root (`studio/`), backend as a workspace package
+  (`packages/tensor-factory-studio`).

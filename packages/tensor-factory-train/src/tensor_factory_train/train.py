@@ -11,7 +11,7 @@ import copy
 import json
 import random
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -192,6 +192,7 @@ def fit(
     require_review: bool = True,
     negatives: Sequence[str | Path] | None = None,
     learn_gain: bool = True,
+    on_epoch: Callable[[dict], None] | None = None,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -211,6 +212,10 @@ def fit(
     (objectness 0); box loss is masked out for them. This is what lets the detector return
     no box at all instead of emitting a spurious one. There is no class label and no
     "background" class -- absence is just the low tail of the one objectness score.
+
+    ``on_epoch``, if given, is called once per epoch with a metrics dict (epoch, loss,
+    val_err, presence_acc, baseline, best_err, is_best, gain, train_count, val_count) --
+    a live hook for callers like the Studio backend; it does not affect training.
     """
     data_dir = Path(data_dir)
     coco = data_dir / "annotations.coco.json"
@@ -286,6 +291,9 @@ def fit(
             optimizer.step()
             total += loss.item() * len(x)
 
+        err: float | None = None
+        acc: float | None = None
+        is_best = False
         line = f"epoch {epoch + 1}/{epochs}  loss {total / len(train_items):.5f}"
         if val_items:
             err, acc = _val_metrics(model, val_items, size, dev, presence=presence)
@@ -301,8 +309,27 @@ def fit(
                 best_score = score
                 best_err = err
                 best_state = copy.deepcopy(model.state_dict())
+                is_best = True
                 line += "  *best"
         print(line)
+        # Optional live hook (e.g. the Studio backend streaming metrics to a browser).
+        # Default None keeps fit() behaviour byte-for-byte unchanged.
+        if on_epoch is not None:
+            on_epoch(
+                {
+                    "epoch": epoch + 1,
+                    "epochs": epochs,
+                    "loss": total / len(train_items),
+                    "val_err": err,
+                    "presence_acc": acc,
+                    "baseline": baseline_err,
+                    "best_err": best_err,
+                    "is_best": is_best,
+                    "gain": float(model.log_gain.detach().exp()),
+                    "train_count": len(train_items),
+                    "val_count": len(val_items),
+                }
+            )
 
     if best_state is not None:
         model.load_state_dict(best_state)

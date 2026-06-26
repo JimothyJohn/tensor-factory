@@ -1,50 +1,49 @@
 # Tensor Factory Studio
 
-A browser-native, active-learning labeling tool for tensor-factory detectors.
-Drop in a video, label frames in a video-game rhythm (mouse draws, left hand drives),
-and export straight into the `tensor-factory-train` dataset format. See
-[`PROMPT.md`](PROMPT.md) for the full vision and the locked design decisions.
+An active-learning labeling tool for tensor-factory detectors. The **browser** handles
+video ingest, the bounding-box canvas, and the video-game-style WASD labeling; a **local
+Python backend** ([`tensor-factory-studio`](../packages/tensor-factory-studio)) owns the
+on-disk dataset and trains the tiny detector continuously on this machine's GPU (MPS/CUDA)
+as you label. See [`PROMPT.md`](PROMPT.md) for the vision and the decision history.
 
-**What works now:** video ingest with dHash dedup, the bounding-box canvas editor, the
-WASD keymap, IndexedDB persistence, COCO export — **and the active-learning loop**:
-continuous in-browser training (TensorFlow.js, WebGPU → WebGL → CPU) in a Web Worker,
-live validation metrics vs the constant-predictor baseline, auto-labeling of unlabeled
-frames, a keep-best guardrail, and model-weight export. No build step. The only
-dependency is TensorFlow.js, vendored under [`vendor/`](vendor/) (Apache-2.0) so the app
-stays self-contained and offline-capable.
+Label a frame → it's pushed to the backend → the detector retrains on everything labeled so
+far → the next unlabeled frame comes back **pre-filled with the model's prediction**. Most
+frames you just confirm. The dataset and the detector improve together, live.
+
+## What works
+
+- **Browser:** video ingest sampling at N fps with dHash dedup (skips frames too similar to
+  ones already labeled), the bounding-box canvas editor, the WASD keymap, IndexedDB
+  persistence, and File-System-Access COCO export.
+- **Backend:** continuous training via `tensor_factory_train.fit` (the same path that makes
+  the repo's bundled models, so it emits the canonical **int8 ONNX**), live per-epoch val
+  metrics vs the constant-predictor baseline, auto-labeling from the best checkpoint, and a
+  keep-best guardrail that won't let a regressed round overwrite a good model.
 
 ## Run
 
-WebGPU and the File System Access API (used for export) need a **secure context** and a
-**Chromium-based browser** — `localhost` counts as secure, `file://` does not. Serve the
-directory and open it:
-
 ```sh
-cd studio
-python3 -m http.server 8000
-# open http://localhost:8000
+uv sync --extra serve          # pulls torch (heavy); training resolves cuda → mps → cpu
+uv run tensor-factory-studio   # serves UI + API on http://127.0.0.1:8089
+# open the printed URL in a Chromium-based browser (File System Access export needs Chromium)
 ```
+
+Flags: `--port --data-dir --ui-dir --size --width --epochs --batch`. For a snappier dev
+loop on CPU, a smaller model trains faster: `--size 96 --width 8 --epochs 4`.
 
 ## Workflow
 
-1. **Load video** — frames are sampled at `fps`; any frame within `dedup` Hamming bits
-   of one already in the set is skipped (so you label novel frames, not 100 near-dupes).
+1. **Load video** — frames are sampled at `fps`; any within `dedup` Hamming bits of one
+   already labeled is skipped, so you spend attention on novel frames.
 2. **Label** — draw a box with the mouse; the left-hand keys move you through frames and
-   commit. The trainer starts automatically once there are ≥3 train / ≥2 val approved
-   samples; from then on each new frame is **pre-filled with the model's prediction**.
-   The rhythm: glance → `Space` if the auto-label is right → otherwise drag a correction
-   and `W`. The sidebar shows live val center-error vs the constant-predictor floor,
-   presence accuracy, the soft-argmax gain, and a guardrail that keeps the best
-   checkpoint and flags regressions (with the likely-bad sample IDs).
-3. **Export dataset** — pick a folder; Studio writes `annotations.coco.json` + `images/`
-   (approved positives) and `negatives/images/` (approved empty frames), ready for
-   `tensor-factory-train`. **Export model** downloads the trained weights as JSON
-   (`TinyDetector` architecture, keyed to match the Python model's params).
-
-The canonical deployable **int8 ONNX** is still produced by `tensor-factory-train` from
-the exported COCO (the proven path that made the bundled models); the in-browser model is
-the live auto-labeler and feedback signal. Tune the browser model with URL params:
-`?size=192&width=12&batch=8` (defaults shown).
+   commit. The trainer starts automatically once ≥4 positives are labeled; from then on each
+   new frame is pre-filled with the model's prediction. Glance → `Space` to accept → or drag
+   a correction and `W`. The sidebar shows live val center-error vs the baseline floor,
+   presence accuracy, the soft-argmax gain, and a guardrail that flags regressions (with the
+   likely-bad sample ids, clickable to jump there).
+3. **Export** — *Export dataset* writes the COCO dataset client-side; *Export model*
+   downloads the backend's trained **int8 ONNX** (`/model`). The backend's own
+   `<data-dir>/annotations.coco.json` is the same layout `tensor-factory-train` reads.
 
 ## Keys (left hand · mouse stays on the canvas)
 
@@ -57,28 +56,28 @@ the live auto-labeler and feedback signal. Tune the browser model with URL param
 | `C`     | mark empty / negative               | `Esc` | cancel the box being drawn    |
 | `Q`/`E` | cycle class                         | `1–5` | select class N                |
 
-## Data & persistence
+## Architecture
 
-Everything (frames, labels) lives in IndexedDB under `tensor-factory-studio`, so a
-session survives a reload. **Clear session** wipes it. The labels round-trip through the
-repo's `BBox` / 4×uint8 contract (ported in [`js/codec.js`](js/codec.js)), and export
-honors the `review=approved` gate — only committed frames leave the browser.
+```
+browser (studio/)                         backend (packages/tensor-factory-studio)
+  ingest + dHash dedup                       POST /samples  -> writes COCO dataset, marks dirty
+  canvas + WASD labeling     --- HTTP -->    GET  /metrics  -> live training metrics (polled)
+  IndexedDB (UI state)                       POST /predict  -> auto-label via best checkpoint
+  metrics panel + sparkline                  GET  /model    -> trained int8 ONNX
+                                             (continuous torch training thread, MPS/CUDA)
+```
+
+Why a backend and not in-browser training: it reuses the trusted torch trainer (so the
+browser model *is* the deployable model), runs real GPU training, and is verifiable locally
+end to end. The earlier in-browser WebGPU/tfjs approach is recorded in `PROMPT.md`.
 
 ## Layout
 
 ```
-index.html        app shell
-studio.css        styling
-js/codec.js       4×uint8 codec + BBox helpers (port of tensor_factory.codec)
-js/dhash.js       64-bit dHash + Hamming (port of extract_frames.py)
-js/store.js       IndexedDB wrapper (frames / labels / meta)
-js/video.js       fps sampling + dHash dedup ingest
-js/canvas.js      bounding-box canvas editor
-js/keymap.js      WASD keymap + help table
-js/export.js      COCO + negatives writer (File System Access API)
-js/trainer.worker.js  in-browser tiny detector: tfjs model, soft-argmax head,
-                      masked loss, continuous train loop, val metrics, guardrail
-js/trainer.js     main-thread controller wrapping the worker
-js/app.js         wiring
-vendor/           vendored TensorFlow.js (see vendor/README.md)
+index.html        app shell                js/keymap.js   WASD keymap + help table
+studio.css        styling                  js/export.js   COCO writer (File System Access API)
+js/codec.js       4×uint8 codec + BBox      js/trainer.js  REST client for the backend
+js/dhash.js       dHash + Hamming           js/app.js      wiring
+js/store.js       IndexedDB wrapper
+js/video.js       fps sampling + dedup      js/canvas.js   bounding-box canvas editor
 ```

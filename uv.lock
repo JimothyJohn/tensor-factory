@@ -15,6 +15,7 @@ members = [
     "tensor-factory",
     "tensor-factory-label",
     "tensor-factory-mcp",
+    "tensor-factory-studio",
     "tensor-factory-synth",
     "tensor-factory-train",
     "tensor-factory-workspace",
@@ -2021,6 +2022,32 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "tensor-factory", extras = ["infer"], editable = "packages/tensor-factory" },
 ]
+
+[[package]]
+name = "tensor-factory-studio"
+version = "0.1.0"
+source = { editable = "packages/tensor-factory-studio" }
+dependencies = [
+    { name = "pillow" },
+    { name = "tensor-factory" },
+    { name = "tensor-factory-train" },
+]
+
+[package.optional-dependencies]
+serve = [
+    { name = "onnxruntime" },
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "onnxruntime", marker = "extra == 'serve'", specifier = ">=1.17" },
+    { name = "pillow", specifier = ">=10" },
+    { name = "tensor-factory", editable = "packages/tensor-factory" },
+    { name = "tensor-factory-train", editable = "packages/tensor-factory-train" },
+    { name = "torch", marker = "extra == 'serve'", specifier = ">=2.2" },
+]
+provides-extras = ["serve"]
 
 [[package]]
 name = "tensor-factory-synth"

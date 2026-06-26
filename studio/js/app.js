@@ -210,6 +210,10 @@ async function autoLabel() {
   const cur = currentFrame();
   if (!cur || cur.id !== fid) return; // navigated away
   if (currentLabel().review === "approved" || editor.getBoxes().length) return;
+  if (!pred.ready) {
+    setAuto("model warming up — label a few more frames");
+    return;
+  }
   if (pred.present) {
     const [x1, y1, x2, y2] = pred.box;
     editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls: state.activeClass }]);
@@ -334,12 +338,7 @@ async function main() {
       $("ingestStatus").textContent = "trainer error: " + text;
     },
   });
-  const qp = new URLSearchParams(location.search);
-  trainer.init({
-    size: parseInt(qp.get("size"), 10) || 192,
-    width: parseInt(qp.get("width"), 10) || 12,
-    batch: parseInt(qp.get("batch"), 10) || 8,
-  });
+  trainer.init();
 
   renderClasses();
   renderKeymapHelp($("keymapHelp"));
@@ -374,16 +373,22 @@ async function main() {
   });
   $("exportBtn").addEventListener("click", doExport);
   $("exportModelBtn").addEventListener("click", async () => {
-    if (!trainer?.ready) return;
-    const w = await trainer.exportWeights();
-    const blob = new Blob([JSON.stringify(w)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "tinydetector-weights.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
-    const best = w.meta.bestErr === Infinity || w.meta.bestErr == null ? "n/a" : `${w.meta.bestErr.toFixed(1)}px`;
-    $("ingestStatus").textContent = `model exported (best val err ${best})`;
+    try {
+      const res = await fetch("/model");
+      if (!res.ok) {
+        $("ingestStatus").textContent = "no trained model yet";
+        return;
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "tinydetector.onnx";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      $("ingestStatus").textContent = `model exported (int8 ONNX, ${(blob.size / 1024).toFixed(0)} KB)`;
+    } catch (e) {
+      $("ingestStatus").textContent = "model export failed: " + e.message;
+    }
   });
   $("pauseBtn").addEventListener("click", () => {
     if (trainer.running) {

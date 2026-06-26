@@ -1,87 +1,80 @@
-// Main-thread controller for the training worker. Owns the worker, forwards
-// labeled samples, surfaces metrics, and turns prediction requests into promises.
+// Client for the tensor-factory-studio backend. Same interface the app used for the old
+// in-browser trainer (init / upsert / predict / reset / pause / resume + callbacks), so
+// app.js is unchanged — only the engine moved: training now runs server-side on torch
+// (MPS/CUDA) and the canonical int8 ONNX falls out of tensor-factory-train.
+
+const POLL_MS = 1500;
 
 export class Trainer {
   constructor({ onReady, onMetrics, onStatus, onError } = {}) {
-    this.worker = new Worker("js/trainer.worker.js");
+    this.cb = { onReady, onMetrics, onStatus, onError };
     this.ready = false;
     this.running = false;
-    this._predPromises = new Map(); // frameId -> {resolve}
-    this._weightsResolve = null;
-
-    this.worker.onmessage = (ev) => {
-      const m = ev.data;
-      switch (m.type) {
-        case "ready":
-          this.ready = true;
-          this.backend = m.backend;
-          onReady?.(m);
-          break;
-        case "metrics":
-          onMetrics?.(m);
-          break;
-        case "status":
-          onStatus?.(m.text);
-          break;
-        case "prediction": {
-          const p = this._predPromises.get(m.frameId);
-          if (p) {
-            this._predPromises.delete(m.frameId);
-            p.resolve(m);
-          }
-          break;
-        }
-        case "weights":
-          this._weightsResolve?.(m);
-          this._weightsResolve = null;
-          break;
-        case "error":
-          onError?.(m.text);
-          break;
-      }
-    };
+    this.backend = "?";
+    this._timer = null;
   }
 
-  init(opts = {}) {
-    this.worker.postMessage({ type: "init", opts });
+  async init() {
+    try {
+      const s = await fetch("/status").then((r) => r.json());
+      this.ready = true;
+      this.running = s.running;
+      this.backend = s.backend;
+      this.cb.onReady?.({ backend: s.backend });
+      this._poll();
+    } catch (e) {
+      this.cb.onError?.(`backend unreachable: ${e.message}`);
+    }
+  }
+
+  _poll() {
+    clearInterval(this._timer);
+    this._timer = setInterval(async () => {
+      try {
+        const m = await fetch("/metrics").then((r) => r.json());
+        this.backend = m.backend || this.backend;
+        this.running = !!m.running;
+        if (m.epoch != null) this.cb.onMetrics?.(m);
+        else this.cb.onStatus?.(m.status || m.phase || "");
+      } catch (e) {
+        this.cb.onError?.(`metrics poll failed: ${e.message}`);
+      }
+    }, POLL_MS);
   }
 
   /** samples: [{frameId, blob, box:[x1,y1,x2,y2]|null, present:0|1}] */
-  upsert(samples) {
-    if (samples.length) this.worker.postMessage({ type: "upsert", samples });
+  async upsert(samples) {
+    for (const s of samples) {
+      const params = new URLSearchParams({ id: String(s.frameId), present: s.present ? "1" : "0" });
+      if (s.present && s.box) params.set("box", s.box.join(","));
+      try {
+        await fetch(`/samples?${params}`, { method: "POST", body: s.blob });
+      } catch (e) {
+        this.cb.onError?.(`upload failed: ${e.message}`);
+      }
+    }
   }
 
-  remove(frameId) {
-    this.worker.postMessage({ type: "remove", frameId });
+  async predict(frameId, blob) {
+    try {
+      const r = await fetch("/predict", { method: "POST", body: blob }).then((x) => x.json());
+      return { ready: !!r.ready, present: !!r.present, score: r.score ?? 0, box: r.box || null };
+    } catch {
+      return { ready: false, present: false, score: 0, box: null };
+    }
   }
 
-  reset() {
-    this.worker.postMessage({ type: "reset" });
+  async reset() {
+    await fetch("/reset", { method: "POST" }).catch(() => {});
   }
 
-  resume() {
+  async resume() {
     this.running = true;
-    this.worker.postMessage({ type: "resume" });
+    await fetch("/resume", { method: "POST" }).catch(() => {});
   }
 
-  pause() {
+  async pause() {
     this.running = false;
-    this.worker.postMessage({ type: "pause" });
-  }
-
-  /** Resolve with {box, score, present} for a frame using the best served weights. */
-  predict(frameId, blob) {
-    return new Promise((resolve) => {
-      this._predPromises.set(frameId, { resolve });
-      this.worker.postMessage({ type: "predict", frameId, blob });
-    });
-  }
-
-  /** Resolve with {meta, tensors} of the current trained weights. */
-  exportWeights() {
-    return new Promise((resolve) => {
-      this._weightsResolve = resolve;
-      this.worker.postMessage({ type: "export" });
-    });
+    await fetch("/pause", { method: "POST" }).catch(() => {});
   }
 }
