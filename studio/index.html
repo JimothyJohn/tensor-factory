@@ -24,11 +24,17 @@
 
     <main>
       <section class="stage">
-        <canvas id="editor" width="760" height="760"></canvas>
-        <p id="emptyHint" class="empty-hint">
-          Load a video to start. Frames too similar to ones already labeled are skipped
-          automatically (dHash dedup). Draw a box with the mouse, then use the keys to move on.
-        </p>
+        <div class="canvas-wrap">
+          <canvas id="editor" width="760" height="760"></canvas>
+          <div id="emptyHint" class="empty-hint">
+            <strong>Load a video to start</strong>
+            <span>
+              Use <b>Load video</b> ↗. Frames too similar to ones already labeled are skipped
+              automatically. Then draw a box with the mouse and tap <span class="k">W</span> to
+              commit — <span class="k">A</span>/<span class="k">D</span> move between frames.
+            </span>
+          </div>
+        </div>
         <div class="status-bar">
           <span id="frameInfo">— / —</span>
           <span id="stateBadges"></span>

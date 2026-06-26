@@ -123,7 +123,7 @@ function renderStatus() {
     add(label.present ? `${label.boxes.length} box` : "empty", label.present ? "ok" : "muted");
     if (label.flag) add("flagged", "flag");
   }
-  $("emptyHint").style.display = n ? "none" : "block";
+  $("emptyHint").style.display = n ? "none" : "flex";
   renderCounts();
 }
 

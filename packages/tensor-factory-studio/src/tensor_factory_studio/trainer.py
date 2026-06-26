@@ -102,7 +102,11 @@ class Trainer(threading.Thread):
         self.device = self._device_pref or resolve_device()
         self._status(f"idle on {self.device}")
         while not self._stop.is_set():
-            self._dirty.wait(timeout=1.0)
+            # Block until new labels arrive. Only train when actually dirty -- a bare
+            # wait()+train would retrain every second forever, saturating the GIL during
+            # ONNX export and starving the HTTP server.
+            if not self._dirty.wait(timeout=1.0):
+                continue
             if self._stop.is_set():
                 break
             if self.paused:

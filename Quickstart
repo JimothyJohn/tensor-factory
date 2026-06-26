@@ -23,17 +23,21 @@ log() {
 help_function() {
     cat <<EOF
 
-Usage: $(basename "$0") [-h] [-c] [-u] [-p]
+Usage: $(basename "$0") [-h] [-c] [-u] [-p] [-s [-- studio args]]
 
 Description:
   Bootstrap the tensor-factory uv workspace and run the MCP detection server, or
-  run the local quality gate.
+  run the local quality gate, or serve the Studio labeling UI.
 
 Options:
   -h, --help        Display this help message and exit
   -c, --check       Run the full local gate: install -> lint+format -> types -> unit
   -u, --unit-test   Run unit tests only
   -p, --publish     Run the full gate, then build and publish to PyPI
+  -s, --studio      Serve Tensor Factory Studio (labeling UI + continuous trainer)
+                    on http://127.0.0.1:8089. Syncs the 'serve' extra (torch) and
+                    opens the browser-driven labeling loop. Extra args pass through,
+                    e.g. './Quickstart -s --port 9000 --size 96'.
 
 With no options, bootstraps the workspace (uv sync) and starts the tensor-factory
 MCP server with standard settings (bundled demo model, stdio) so you can try the
@@ -109,6 +113,13 @@ run_server() {
     exec uv run --package tensor-factory-mcp tensor-factory-mcp
 }
 
+run_studio() {
+    log "Starting Tensor Factory Studio (labeling UI + continuous trainer)"
+    log "Open http://127.0.0.1:8089 in a Chromium-based browser; Ctrl-C to stop."
+    # --extra serve pulls torch on first run; training resolves cuda -> mps -> cpu.
+    exec uv run --package tensor-factory-studio --extra serve tensor-factory-studio "$@"
+}
+
 test_unit() {
     log "Running unit tests..."
     # `python -m pytest` (not bare `uv run pytest`) pins the venv interpreter so a
@@ -158,6 +169,10 @@ main() {
             -u|--unit-test)
                 test_unit || { log "Unit tests failed"; exit 1; }
                 exit 0
+                ;;
+            -s|--studio)
+                shift
+                run_studio "$@"  # exec's into the server; does not return
                 ;;
             -p|--publish)
                 validate_and_build || { log "Validation failed"; exit 1; }

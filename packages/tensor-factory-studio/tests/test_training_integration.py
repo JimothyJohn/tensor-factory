@@ -91,3 +91,36 @@ def test_continuous_round_produces_served_model_and_metrics(tmp_path):
     with Image.open(io.BytesIO(png)) as im:
         score = det.detect_presence(im.convert("RGB"))
     assert 0.0 <= score <= 1.0
+
+
+@pytest.mark.integration
+def test_trainer_idles_without_new_labels(tmp_path):
+    # Regression: the loop must only train when newly dirty. A bare wait()+train
+    # retrained every second forever (version kept climbing), saturating the server.
+    ds = Dataset(tmp_path / "data")
+    for i in range(6):
+        png, box = _positive(i)
+        ds.upsert(i, True, box, png)
+    ds.upsert(100, False, None, _negative(0))
+
+    tr = Trainer(
+        ds,
+        tmp_path / "data" / "models",
+        size=96,
+        width=8,
+        epochs=2,
+        batch=4,
+        min_positives=4,
+        device="cpu",
+    )
+    tr.start()
+    tr.mark_dirty()
+    deadline = time.time() + 120
+    while time.time() < deadline and tr.version == 0:
+        time.sleep(0.5)
+    assert tr.version == 1, "first dirty should trigger exactly one round"
+
+    # no new labels -> no new rounds
+    time.sleep(4)
+    tr.stop()
+    assert tr.version == 1, f"trainer retrained without new labels (version={tr.version})"
