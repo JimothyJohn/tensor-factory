@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tensor Factory Studio</title>
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Tensor Factory <span>Studio</span></h1>
+      <div class="toolbar">
+        <label class="btn">
+          <input type="file" id="videoInput" accept="video/*" hidden />
+          Load video
+        </label>
+        <label class="field">fps <input id="fpsInput" type="number" min="0.1" step="0.1" value="1" /></label>
+        <label class="field">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="6" /></label>
+        <button class="btn" id="exportBtn">Export dataset</button>
+        <button class="btn ghost" id="clearBtn">Clear session</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="stage">
+        <canvas id="editor" width="760" height="760"></canvas>
+        <p id="emptyHint" class="empty-hint">
+          Load a video to start. Frames too similar to ones already labeled are skipped
+          automatically (dHash dedup). Draw a box with the mouse, then use the keys to move on.
+        </p>
+        <div class="status-bar">
+          <span id="frameInfo">— / —</span>
+          <span id="stateBadges"></span>
+          <span id="counts" class="counts"></span>
+        </div>
+        <p id="ingestStatus" class="ingest-status"></p>
+      </section>
+
+      <aside class="panel">
+        <div class="block">
+          <h2>Classes</h2>
+          <div id="classRow" class="class-row"></div>
+        </div>
+
+        <div class="block">
+          <h2>Trainer</h2>
+          <div class="trainer-placeholder">
+            Continuous in-browser WebGPU training, live val metrics, and the
+            keep-best guardrail arrive in slice 2. Label now — the dataset persists.
+          </div>
+        </div>
+
+        <div class="block">
+          <h2>Keys <small>left hand · mouse draws</small></h2>
+          <div id="keymapHelp" class="keymap"></div>
+        </div>
+      </aside>
+    </main>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
