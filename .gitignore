@@ -29,3 +29,6 @@ images/
 # Kept out of git: unknown provenance, and this repo is destined for open-source.
 /Helicoil-Application.jpg
 .hypothesis
+
+# Public validation datasets (downloaded, not redistributed) — Oxford-IIIT Pet etc.
+examples/pets-validation/data/
