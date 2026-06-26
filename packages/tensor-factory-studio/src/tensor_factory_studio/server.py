@@ -19,6 +19,7 @@ Routes:
 from __future__ import annotations
 
 import contextlib
+import errno
 import functools
 import json
 import mimetypes
@@ -258,8 +259,22 @@ def serve(
     data = Path(data_dir) if data_dir else ui / ".data"
     dataset = Dataset(data)
     trainer = Trainer(dataset, data / "models", size=size, width=width, epochs=epochs, batch=batch)
+    # Bind BEFORE starting the trainer so a port clash fails loudly instead of leaving a
+    # zombie server (or a previous instance) shadowing this one -- you'd be talking to the
+    # wrong process and never see your changes.
+    try:
+        httpd = make_server(
+            host, port, dataset=dataset, trainer=trainer, ui_dir=ui, input_size=size
+        )
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(
+                f"port {port} is already in use -- another server is holding it. Free it "
+                f"(`lsof -nP -iTCP:{port} -sTCP:LISTEN`, then kill the PID) or pass --port."
+            )
+            return 1
+        raise
     trainer.start()
-    httpd = make_server(host, port, dataset=dataset, trainer=trainer, ui_dir=ui, input_size=size)
     bound = httpd.server_address[1]
     print(f"tensor-factory-studio on http://{host}:{bound}  (data: {data})")
     try:

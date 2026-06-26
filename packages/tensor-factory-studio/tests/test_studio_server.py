@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from tensor_factory_studio.dataset import Dataset
-from tensor_factory_studio.server import make_server
+from tensor_factory_studio.server import make_server, serve
 from tensor_factory_studio.trainer import Trainer
 
 
@@ -118,6 +118,26 @@ def test_unknown_route_404(server):
     with pytest.raises(HTTPError) as exc:
         _post(base, "/nope")
     assert exc.value.code == 404
+
+
+@pytest.mark.unit
+def test_serve_fails_cleanly_when_port_in_use(tmp_path):
+    # Regression: a busy port must return 1 with guidance, not crash with a traceback
+    # while a zombie server keeps shadowing this one (the "nothing changed" bug).
+    import socket
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("x", encoding="utf-8")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    port = sock.getsockname()[1]
+    try:
+        rc = serve("127.0.0.1", port, data_dir=tmp_path / "data", ui_dir=ui)
+        assert rc == 1
+    finally:
+        sock.close()
 
 
 @pytest.mark.unit
