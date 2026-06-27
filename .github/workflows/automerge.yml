@@ -1,0 +1,35 @@
+name: Auto-merge
+
+# Self-approve and enable auto-merge so a PR squash-merges itself once the
+# required CI `gate` check is green -- "if it doesn't break anything, just
+# merge it". This fires only for trusted authors (Dependabot + the repo owner)
+# and only for NON-draft PRs: open a draft when you want to hold a change for
+# review. Everyone else's PRs are skipped here and still need an owner review.
+#
+# Nothing below checks out or runs PR-authored code (just `gh` calls), so the
+# `pull_request` trigger is safe to grant write to.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: >-
+      github.event.pull_request.draft == false &&
+      ( github.actor == 'dependabot[bot]' ||
+        github.actor == github.event.repository.owner.login )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
