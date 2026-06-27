@@ -99,6 +99,19 @@ h1 span {
   color: var(--accent);
 }
 
+.dino-prompt {
+  width: 140px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.dino-prompt::placeholder {
+  color: var(--muted);
+}
+
 main {
   display: grid;
   grid-template-columns: 1fr 320px;

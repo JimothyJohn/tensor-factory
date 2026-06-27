@@ -24,6 +24,7 @@ const state = {
   activeClass: 0,
   index: 0,
   bitmap: null,
+  lastBox: null, // last committed positive box — used to ROI-prime GroundingDINO
 };
 
 function emptyLabel(frameId) {
@@ -61,6 +62,11 @@ async function saveWorking(review) {
 // --- navigation ------------------------------------------------------------
 async function go(delta, { commit = null } = {}) {
   const fid = currentFrame()?.id;
+  // Remember the committed box so GroundingDINO can search near it on the next frame.
+  if (commit === "approved") {
+    const boxes = editor.getBoxes();
+    if (boxes.length) state.lastBox = { ...boxes[0] };
+  }
   await saveWorking(commit);
   if (fid != null && (commit === "approved" || commit === "negative")) pushSample(fid);
   const n = state.frames.length;
@@ -235,10 +241,56 @@ function autoLabelEnabled() {
   return !!$("autoLabelToggle")?.checked;
 }
 
+function dinoEnabled() {
+  return !!$("dinoToggle")?.checked && !!$("dinoPrompt")?.value.trim();
+}
+
+// GroundingDINO auto-label: open-vocab, needs no trained model, primed by the previous
+// frame's box (the server crops to that region). Its own opt-in toggle + text prompt.
+async function dinoLabel() {
+  const f = currentFrame();
+  if (!f) return;
+  const label = currentLabel();
+  if (label.review === "approved" || editor.getBoxes().length) return;
+  const fid = f.id;
+  const prompt = $("dinoPrompt").value.trim();
+  const params = new URLSearchParams({ prompt });
+  if (state.lastBox) {
+    const b = state.lastBox;
+    params.set("box", [b.x1, b.y1, b.x2, b.y2].join(","));
+  }
+  setAuto(`GroundingDINO searching for "${prompt}"…`);
+  let r;
+  try {
+    r = await fetch(`/autolabel?${params}`, { method: "POST", body: f.blob }).then((x) => x.json());
+  } catch (e) {
+    toast.error(`GroundingDINO request failed: ${e.message}`);
+    setAuto("");
+    return;
+  }
+  const cur = currentFrame();
+  if (!cur || cur.id !== fid) return; // navigated away
+  if (currentLabel().review === "approved" || editor.getBoxes().length) return;
+  if (r.error) {
+    toast.error(`GroundingDINO: ${r.error}`);
+    setAuto("GroundingDINO unavailable — see the message; you can still label by hand");
+    return;
+  }
+  if (r.present && r.box) {
+    const [x1, y1, x2, y2] = r.box;
+    editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls: state.activeClass }]);
+    const primed = r.primed ? " (primed by previous frame)" : "";
+    setAuto(`GroundingDINO${primed} · ${r.label} ${((r.score ?? 0) * 100).toFixed(0)}% · Space to accept, drag to fix`);
+  } else {
+    setAuto(`GroundingDINO found no "${prompt}" · C to confirm empty`);
+  }
+}
+
 // Ask the trainer to pre-fill an unlabeled frame with its prediction.
 // Opt-in only: when the toggle is off, no machine guess ever appears, so the user can't
 // accept an unreviewed box by reflex and corrupt the training set.
 async function autoLabel() {
+  if (dinoEnabled()) return dinoLabel(); // GroundingDINO takes precedence when armed
   if (!autoLabelEnabled()) return;
   const f = currentFrame();
   if (!trainer || !trainer.ready || !f) return;
@@ -456,6 +508,28 @@ async function main() {
     }
   });
 
+  // GroundingDINO opt-in: toggle + text prompt, both remembered across reloads
+  const dinoToggle = $("dinoToggle");
+  const dinoPrompt = $("dinoPrompt");
+  try {
+    dinoToggle.checked = localStorage.getItem("studio.dino") === "1";
+    dinoPrompt.value = localStorage.getItem("studio.dinoPrompt") || "";
+  } catch {
+    /* storage unavailable */
+  }
+  const dinoChanged = () => {
+    try {
+      localStorage.setItem("studio.dino", dinoToggle.checked ? "1" : "0");
+      localStorage.setItem("studio.dinoPrompt", dinoPrompt.value);
+    } catch {
+      /* non-fatal */
+    }
+    if (dinoEnabled()) autoLabel();
+    else setAuto("");
+  };
+  dinoToggle.addEventListener("change", dinoChanged);
+  dinoPrompt.addEventListener("change", dinoChanged);
+
   $("videoInput").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (file) ingest(file);
@@ -496,6 +570,7 @@ async function main() {
     await state.store.clearAll();
     trainer.reset();
     setAuto("");
+    state.lastBox = null;
     state.index = 0;
     await refreshFrames();
     await loadCurrent();
