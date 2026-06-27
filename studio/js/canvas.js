@@ -27,12 +27,11 @@ export class CanvasEditor {
     this.cursorPx = null; // {x,y} in canvas-buffer px, for the crosshair guides
 
     canvas.addEventListener("mousedown", (e) => this._down(e));
-    canvas.addEventListener("mousemove", (e) => this._move(e));
-    canvas.addEventListener("mouseleave", () => {
-      this.cursorPx = null;
-      this.render();
-    });
+    // Track movement on the WINDOW, not just the canvas, so a drag keeps tracking the
+    // cursor after it spills past an edge (events stop firing once it leaves the element).
+    window.addEventListener("mousemove", (e) => this._move(e));
     window.addEventListener("mouseup", (e) => this._up(e));
+    this._wasInside = false;
   }
 
   /**
@@ -116,14 +115,22 @@ export class CanvasEditor {
   }
 
   _move(e) {
-    // Track the cursor for the crosshair guides whether or not we're drawing.
-    this.cursorPx = this._clientToCanvas(e.clientX, e.clientY);
+    const r = this.canvas.getBoundingClientRect();
+    const inside =
+      e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    // Crosshair guides follow the cursor only while it's over the canvas.
+    this.cursorPx = inside ? this._clientToCanvas(e.clientX, e.clientY) : null;
     if (this.drawing) {
+      // _toNorm clamps x and y to [0,1] independently, so spilling past one edge pins that
+      // edge while the other axis keeps tracking the cursor.
       const { x, y } = this._toNorm(e.clientX, e.clientY);
       this.drawing.x2 = x;
       this.drawing.y2 = y;
     }
-    this.render();
+    // This fires for movement anywhere on the page; only repaint when something visible
+    // changed: mid-draw, while hovering the canvas, or on the move that just left it.
+    if (this.drawing || inside || this._wasInside) this.render();
+    this._wasInside = inside;
   }
 
   _up() {
