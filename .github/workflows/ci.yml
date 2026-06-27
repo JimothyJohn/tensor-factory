@@ -1,11 +1,14 @@
 name: CI
 
-# The local gate is ./Quickstart -c; this runs the same steps in CI so a green PR locally is
-# a green PR here. Pull requests and pushes to master both run it.
+# Mirrors the local gate (./Quickstart -c) so green-locally == green-in-CI:
+# ruff lint + format, ty types, pytest unit, AND the Studio JS unit tests.
+# Pull requests and pushes to master both run it; this is the single required
+# status check that branch protection and Dependabot auto-merge gate on.
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,6 +28,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Set up Node (Studio JS tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Sync (locked)
         run: uv sync --locked --all-packages
 
@@ -37,5 +45,8 @@ jobs:
       - name: Type check
         run: uv run ty check
 
-      - name: Unit tests
+      - name: Unit tests (Python)
         run: uv run --all-packages python -m pytest -m unit
+
+      - name: Unit tests (Studio JS)
+        run: node --test studio/tests/*.test.mjs

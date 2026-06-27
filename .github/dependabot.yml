@@ -1,0 +1,39 @@
+version: 2
+
+# Dependabot opens weekly update PRs. The companion workflow
+# (.github/workflows/dependabot-automerge.yml) self-approves and enables
+# auto-merge on these, so they land automatically once the CI `gate` check is
+# green. Updates are grouped one-PR-per-ecosystem to keep the noise down.
+updates:
+  # Python: the whole uv workspace resolves from a single root uv.lock, so one
+  # entry at the repo root covers every package under packages/*.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      python:
+        patterns:
+          - "*"
+
+  # The actions pinned in .github/workflows/*.yml (checkout, setup-uv, ...).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci(actions)"
+    groups:
+      actions:
+        patterns:
+          - "*"

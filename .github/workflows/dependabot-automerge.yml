@@ -1,0 +1,29 @@
+name: Dependabot auto-merge
+
+# When Dependabot opens an update PR, self-approve it and turn on auto-merge.
+# GitHub then squash-merges it automatically once the required CI `gate` check
+# passes -- "if all tests pass, just merge". Nothing here runs PR-authored code
+# (no checkout, no build), and the `actor` guard means it only ever fires for
+# Dependabot's own PRs, so a `pull_request` trigger is safe to grant write to.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
