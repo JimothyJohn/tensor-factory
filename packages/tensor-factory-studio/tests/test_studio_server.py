@@ -223,3 +223,32 @@ def test_head_request_on_index(server):
     with urllib.request.urlopen(req) as r:
         assert r.status == 200
         assert r.read() == b""  # HEAD has no body
+
+
+@pytest.mark.unit
+def test_autolabel_requires_a_prompt(server):
+    base, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/autolabel", _png())
+    assert exc.value.code == 400
+
+
+@pytest.mark.unit
+def test_autolabel_endpoint_returns_detection(server, monkeypatch):
+    # stub the heavy model — this verifies the route/plumbing, not GroundingDINO itself
+    base, _ = server
+    import tensor_factory_studio.autolabel as al
+
+    def fake(_png_bytes, prompt, *, prev_box=None, **_):
+        return {
+            "present": True,
+            "box": [0, 0, 0.5, 0.5],
+            "score": 0.9,
+            "label": prompt,
+            "primed": prev_box is not None,
+        }
+
+    monkeypatch.setattr(al, "autolabel", fake)
+    code, body = _post(base, "/autolabel?prompt=helicoil&box=0.4,0.4,0.6,0.6", _png())
+    assert code == 200
+    assert body["present"] is True and body["label"] == "helicoil" and body["primed"] is True

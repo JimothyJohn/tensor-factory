@@ -24,7 +24,7 @@ const state = {
   activeClass: 0,
   index: 0,
   bitmap: null,
-  lastBox: null, // last committed positive box, carried forward to prime the next frame
+  lastBox: null, // last committed positive box — carried forward + used to ROI-prime GroundingDINO
 };
 
 function emptyLabel(frameId) {
@@ -62,7 +62,8 @@ async function saveWorking(review) {
 // --- navigation ------------------------------------------------------------
 async function go(delta, { commit = null } = {}) {
   const fid = currentFrame()?.id;
-  // Remember the box you just committed so it can prime the next frame (video tracking).
+  // Remember the committed box: carried forward to the next frame, and used to ROI-prime
+  // GroundingDINO (search near where the object was).
   if (commit === "approved") {
     const boxes = editor.getBoxes();
     if (boxes.length) state.lastBox = { ...boxes[0] };
@@ -241,16 +242,21 @@ function autoLabelEnabled() {
   return !!$("autoLabelToggle")?.checked;
 }
 
-// Prime each new frame from the previous one: carry the last committed box forward
-// (instant, works from frame 1 since consecutive video frames barely move). Only when
-// nothing has been committed yet do we fall back to the trained model's guess. Gated by
-// the same opt-in toggle, so with auto-label off you get a fully manual, no-surprise pass.
+function dinoEnabled() {
+  return !!$("dinoToggle")?.checked && !!$("dinoPrompt")?.value.trim();
+}
+
+// Single suggestion entry, called on every new frame. Precedence, all opt-in and all
+// only *pre-fill* a box (never commit): GroundingDINO (open-vocab, no model needed) →
+// carry the previous committed box forward (instant, works from frame 1) → the trained
+// model's guess. With every source off you get a fully manual, no-surprise pass.
 async function suggest() {
-  if (!autoLabelEnabled()) return;
   const f = currentFrame();
   if (!f) return;
   const label = currentLabel();
   if (label.review === "approved" || editor.getBoxes().length) return;
+  if (dinoEnabled()) return dinoLabel();
+  if (!autoLabelEnabled()) return;
   if (state.lastBox) {
     editor.setFrame(state.bitmap, [{ ...state.lastBox }]);
     setAuto("box carried from previous frame · drag to adjust, Space to accept, C if gone");
@@ -259,9 +265,48 @@ async function suggest() {
   await autoLabel(); // nothing to carry yet — let the model suggest
 }
 
-// Ask the trainer to pre-fill an unlabeled frame with its prediction.
-// Opt-in only: when the toggle is off, no machine guess ever appears, so the user can't
-// accept an unreviewed box by reflex and corrupt the training set.
+// GroundingDINO auto-label: open-vocab, needs no trained model, primed by the previous
+// frame's box (the server crops to that region). Its own opt-in toggle + text prompt.
+async function dinoLabel() {
+  const f = currentFrame();
+  if (!f) return;
+  const label = currentLabel();
+  if (label.review === "approved" || editor.getBoxes().length) return;
+  const fid = f.id;
+  const prompt = $("dinoPrompt").value.trim();
+  const params = new URLSearchParams({ prompt });
+  if (state.lastBox) {
+    const b = state.lastBox;
+    params.set("box", [b.x1, b.y1, b.x2, b.y2].join(","));
+  }
+  setAuto(`GroundingDINO searching for "${prompt}"…`);
+  let r;
+  try {
+    r = await fetch(`/autolabel?${params}`, { method: "POST", body: f.blob }).then((x) => x.json());
+  } catch (e) {
+    toast.error(`GroundingDINO request failed: ${e.message}`);
+    setAuto("");
+    return;
+  }
+  const cur = currentFrame();
+  if (!cur || cur.id !== fid) return; // navigated away
+  if (currentLabel().review === "approved" || editor.getBoxes().length) return;
+  if (r.error) {
+    toast.error(`GroundingDINO: ${r.error}`);
+    setAuto("GroundingDINO unavailable — see the message; you can still label by hand");
+    return;
+  }
+  if (r.present && r.box) {
+    const [x1, y1, x2, y2] = r.box;
+    editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls: state.activeClass }]);
+    const primed = r.primed ? " (primed by previous frame)" : "";
+    setAuto(`GroundingDINO${primed} · ${r.label} ${((r.score ?? 0) * 100).toFixed(0)}% · Space to accept, drag to fix`);
+  } else {
+    setAuto(`GroundingDINO found no "${prompt}" · C to confirm empty`);
+  }
+}
+
+// Model-prediction path (the trainer's guess); reached via suggest() as the fallback.
 async function autoLabel() {
   if (!autoLabelEnabled()) return;
   const f = currentFrame();
@@ -473,12 +518,31 @@ async function main() {
     } catch {
       /* non-fatal */
     }
-    if (autoToggle.checked) {
-      autoLabel(); // pre-fill the current frame right away
-    } else {
-      setAuto(""); // clear any pending suggestion text
-    }
+    setAuto(""); // clear any stale suggestion, then re-run the suggestion logic
+    suggest(); // pre-fills the current frame if a source is enabled; no-op otherwise
   });
+
+  // GroundingDINO opt-in: toggle + text prompt, both remembered across reloads
+  const dinoToggle = $("dinoToggle");
+  const dinoPrompt = $("dinoPrompt");
+  try {
+    dinoToggle.checked = localStorage.getItem("studio.dino") === "1";
+    dinoPrompt.value = localStorage.getItem("studio.dinoPrompt") || "";
+  } catch {
+    /* storage unavailable */
+  }
+  const dinoChanged = () => {
+    try {
+      localStorage.setItem("studio.dino", dinoToggle.checked ? "1" : "0");
+      localStorage.setItem("studio.dinoPrompt", dinoPrompt.value);
+    } catch {
+      /* non-fatal */
+    }
+    setAuto("");
+    suggest();
+  };
+  dinoToggle.addEventListener("change", dinoChanged);
+  dinoPrompt.addEventListener("change", dinoChanged);
 
   $("videoInput").addEventListener("change", (e) => {
     const file = e.target.files[0];

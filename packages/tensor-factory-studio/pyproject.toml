@@ -8,6 +8,7 @@ license = "Apache-2.0"
 dependencies = [
     "tensor-factory",
     "tensor-factory-train",
+    "tensor-factory-synth",
     "pillow>=10",
 ]
 
@@ -17,6 +18,11 @@ dependencies = [
 serve = [
     "torch>=2.2",
     "onnxruntime>=1.17",
+]
+# Optional GroundingDINO auto-labeler (the /autolabel endpoint). Heavy: transformers +
+# a ~700MB model download on first use. `uv sync --extra serve --extra autolabel`.
+autolabel = [
+    "tensor-factory-synth[gpu]",
 ]
 
 [project.scripts]
@@ -32,3 +38,4 @@ packages = ["src/tensor_factory_studio"]
 [tool.uv.sources]
 tensor-factory = { workspace = true }
 tensor-factory-train = { workspace = true }
+tensor-factory-synth = { workspace = true }

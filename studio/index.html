@@ -23,6 +23,14 @@
           <input type="checkbox" id="autoLabelToggle" />
           auto-label
         </label>
+        <label
+          class="toggle"
+          title="GroundingDINO open-vocabulary auto-label — needs no trained model, primed by the previous frame's box (the server crops to that region). Type what to find. Requires the server's 'autolabel' extra."
+        >
+          <input type="checkbox" id="dinoToggle" />
+          dino
+        </label>
+        <input id="dinoPrompt" class="dino-prompt" type="text" placeholder="find e.g. helicoil" />
         <button class="btn" id="exportBtn">Export dataset</button>
         <button class="btn" id="exportModelBtn">Export model</button>
         <button class="btn ghost" id="clearBtn">Clear session</button>

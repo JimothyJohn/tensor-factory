@@ -169,6 +169,8 @@ def _make_handler(
                 self._post_samples()
             elif route == "/predict":
                 self._post_predict()
+            elif route == "/autolabel":
+                self._post_autolabel()
             elif route == "/reset":
                 dataset.clear()
                 trainer.reset()
@@ -221,6 +223,35 @@ def _make_handler(
                 self._json(200, _predict(str(trainer.served), input_size, body))
             except Exception as exc:  # noqa: BLE001
                 self._json(400, {"error": f"predict failed: {type(exc).__name__}"})
+
+        def _post_autolabel(self) -> None:
+            # Open-vocab GroundingDINO, primed by the previous frame's box (ROI crop).
+            # Works with no trained model -- great for cold-start labeling.
+            q = parse_qs(urlsplit(self.path).query)
+            prompt = q.get("prompt", [""])[0].strip()
+            if not prompt:
+                self._json(400, {"error": "prompt query param required (e.g. ?prompt=helicoil)"})
+                return
+            prev_box = None
+            if q.get("box", [""])[0]:
+                try:
+                    prev_box = [float(v) for v in q["box"][0].split(",")]
+                    if len(prev_box) != 4:
+                        raise ValueError
+                except ValueError:
+                    self._json(400, {"error": "box must be x1,y1,x2,y2"})
+                    return
+            body = self._read_body()
+            if body is None:
+                return
+            from .autolabel import autolabel
+
+            try:
+                self._json(200, autolabel(body, prompt, prev_box=prev_box))
+            except RuntimeError as exc:  # missing 'autolabel' extra -> actionable 503
+                self._json(503, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 -- bad image / inference error
+                self._json(400, {"error": f"autolabel failed: {type(exc).__name__}: {exc}"})
 
     return Handler
 
