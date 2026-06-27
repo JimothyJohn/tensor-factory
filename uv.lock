@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -2044,7 +2044,7 @@ gpu = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'gpu'", specifier = ">=0.30" },
-    { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=2.10.0" },
+    { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1" },
     { name = "pillow", specifier = ">=10" },
     { name = "tensor-factory", editable = "packages/tensor-factory" },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.2" },
