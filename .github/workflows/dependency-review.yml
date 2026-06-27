@@ -1,0 +1,25 @@
+name: Dependency review
+
+# On every PR, diff the dependency graph and fail if the change pulls in a
+# known-vulnerable package or a copyleft license. The license gate enforces
+# this project's thesis -- Apache-2.0 throughout, zero AGPL exposure (no
+# Ultralytics). Loosen `deny-licenses` if a legitimate dep trips it.
+on:
+  pull_request:
+    branches: [master, dev]
+
+permissions:
+  contents: read
+  pull-requests: write # post the summary comment
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later, GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later
+          comment-summary-in-pr: on-failure

@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Static security analysis. Findings land in the repo's Security tab and raise
+# code-scanning alerts (the "security notification"). Runs on pushes to the
+# long-lived branches, on PRs into them, and weekly so newly-disclosed query
+# patterns catch existing code without waiting for a push.
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+  schedule:
+    - cron: "27 4 * * 1" # Mondays 04:27 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload results to code scanning
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # python = the core/serving/training backend; javascript-typescript =
+        # the Studio browser modules under studio/ that handle user input.
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
