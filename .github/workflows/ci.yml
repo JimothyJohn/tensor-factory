@@ -2,11 +2,12 @@ name: CI
 
 # Mirrors the local gate (./Quickstart -c) so green-locally == green-in-CI:
 # ruff lint + format, ty types, pytest unit, AND the Studio JS unit tests.
-# Pull requests and pushes to master both run it; this is the single required
-# status check that branch protection and Dependabot auto-merge gate on.
+# Runs on PRs and on pushes to the long-lived branches (dev integration +
+# master release); this `gate` job is the single required status check that
+# branch protection on `dev` and Dependabot auto-merge gate on.
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
   workflow_dispatch:
 
