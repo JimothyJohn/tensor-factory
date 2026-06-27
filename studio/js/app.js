@@ -355,6 +355,34 @@ async function main() {
   );
   editor.setClasses(state.classes);
 
+  // Resizable preview: keep the canvas drawing buffer matched to its displayed size
+  // (crisp render + pixel-accurate crosshair/boxes) and remember the size across reloads.
+  const wrap = document.querySelector(".canvas-wrap");
+  try {
+    const saved = JSON.parse(localStorage.getItem("studio.canvasSize") || "null");
+    if (saved && saved.w && saved.h) {
+      wrap.style.width = `${saved.w}px`;
+      wrap.style.height = `${saved.h}px`;
+    }
+  } catch {
+    /* storage unavailable or corrupt — ignore */
+  }
+  let sizeTimer;
+  new ResizeObserver(() => {
+    editor.fitToDisplay();
+    clearTimeout(sizeTimer);
+    sizeTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          "studio.canvasSize",
+          JSON.stringify({ w: Math.round(wrap.clientWidth), h: Math.round(wrap.clientHeight) }),
+        );
+      } catch {
+        /* storage unavailable — non-fatal */
+      }
+    }, 300);
+  }).observe(wrap);
+
   trainer = new Trainer({
     onReady: (m) => {
       $("backendTag").textContent = m.backend;

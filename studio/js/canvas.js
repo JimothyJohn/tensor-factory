@@ -24,10 +24,29 @@ export class CanvasEditor {
     this.boxes = []; // [{x1,y1,x2,y2,cls}] normalized
     this.selected = -1;
     this.drawing = null; // {x1,y1,x2,y2} in-progress, normalized
+    this.cursorPx = null; // {x,y} in canvas-buffer px, for the crosshair guides
 
     canvas.addEventListener("mousedown", (e) => this._down(e));
     canvas.addEventListener("mousemove", (e) => this._move(e));
+    canvas.addEventListener("mouseleave", () => {
+      this.cursorPx = null;
+      this.render();
+    });
     window.addEventListener("mouseup", (e) => this._up(e));
+  }
+
+  /**
+   * Match the canvas drawing buffer to its displayed size so a resized preview stays
+   * crisp (and the crosshair/box math stays pixel-accurate). Called by a ResizeObserver.
+   */
+  fitToDisplay() {
+    const w = Math.round(this.canvas.clientWidth) || this.canvas.width;
+    const h = Math.round(this.canvas.clientHeight) || this.canvas.height;
+    if (w && h && (this.canvas.width !== w || this.canvas.height !== h)) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.render();
   }
 
   setClasses(classes) {
@@ -59,10 +78,17 @@ export class CanvasEditor {
     return { ox: (cw - dw) / 2, oy: (ch - dh) / 2, dw, dh };
   }
 
-  _toNorm(clientX, clientY) {
+  // client (CSS) coords -> canvas-buffer px (works at any display size)
+  _clientToCanvas(clientX, clientY) {
     const r = this.canvas.getBoundingClientRect();
-    const px = ((clientX - r.left) / r.width) * this.canvas.width;
-    const py = ((clientY - r.top) / r.height) * this.canvas.height;
+    return {
+      x: ((clientX - r.left) / r.width) * this.canvas.width,
+      y: ((clientY - r.top) / r.height) * this.canvas.height,
+    };
+  }
+
+  _toNorm(clientX, clientY) {
+    const { x: px, y: py } = this._clientToCanvas(clientX, clientY);
     const { ox, oy, dw, dh } = this._rect();
     return { x: clamp01((px - ox) / dw), y: clamp01((py - oy) / dh) };
   }
@@ -90,10 +116,13 @@ export class CanvasEditor {
   }
 
   _move(e) {
-    if (!this.drawing) return;
-    const { x, y } = this._toNorm(e.clientX, e.clientY);
-    this.drawing.x2 = x;
-    this.drawing.y2 = y;
+    // Track the cursor for the crosshair guides whether or not we're drawing.
+    this.cursorPx = this._clientToCanvas(e.clientX, e.clientY);
+    if (this.drawing) {
+      const { x, y } = this._toNorm(e.clientX, e.clientY);
+      this.drawing.x2 = x;
+      this.drawing.y2 = y;
+    }
     this.render();
   }
 
@@ -191,5 +220,33 @@ export class CanvasEditor {
     if (this.drawing) {
       drawBox(orderClamp(this.drawing), this.getActiveClass().color, true);
     }
+    this._drawCrosshair(ox, oy, dw, dh);
   }
+
+  // Faint full-image vertical + horizontal guides at the cursor, so the user can see
+  // exactly where an edge will land. Only drawn while the cursor is over the image.
+  _drawCrosshair(ox, oy, dw, dh) {
+    const c = this.cursorPx;
+    if (!c) return;
+    if (c.x < ox || c.x > ox + dw || c.y < oy || c.y > oy + dh) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 1;
+    // dark underlay then light line, so the guides read on both bright and dark frames
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    line(ctx, c.x + 0.5, oy, c.x + 0.5, oy + dh);
+    line(ctx, ox, c.y + 0.5, ox + dw, c.y + 0.5);
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.setLineDash([4, 4]);
+    line(ctx, c.x + 0.5, oy, c.x + 0.5, oy + dh);
+    line(ctx, ox, c.y + 0.5, ox + dw, c.y + 0.5);
+    ctx.restore();
+  }
+}
+
+function line(ctx, x1, y1, x2, y2) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
 }
