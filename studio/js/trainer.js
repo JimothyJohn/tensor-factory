@@ -20,10 +20,26 @@ export class Trainer {
       this.ready = true;
       this.running = s.running;
       this.backend = s.backend;
-      this.cb.onReady?.({ backend: s.backend });
+      this.cb.onReady?.({ backend: s.backend, classes: s.classes });
       this._poll();
     } catch (e) {
       this.cb.onError?.(`backend unreachable: ${e.message}`);
+    }
+  }
+
+  /** Push the ordered class list to the backend (it rewrites COCO categories + retrains). */
+  async setClasses(names) {
+    try {
+      const r = await fetch("/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classes: names }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return (await r.json()).classes;
+    } catch (e) {
+      this.cb.onError?.(`set classes failed: ${e.message}`);
+      return null;
     }
   }
 
@@ -42,11 +58,14 @@ export class Trainer {
     }, POLL_MS);
   }
 
-  /** samples: [{frameId, blob, box:[x1,y1,x2,y2]|null, present:0|1}] */
+  /** samples: [{frameId, blob, box:[x1,y1,x2,y2]|null, present:0|1, cls:int}] */
   async upsert(samples) {
     for (const s of samples) {
       const params = new URLSearchParams({ id: String(s.frameId), present: s.present ? "1" : "0" });
-      if (s.present && s.box) params.set("box", s.box.join(","));
+      if (s.present && s.box) {
+        params.set("box", s.box.join(","));
+        params.set("cls", String(s.cls ?? 0));
+      }
       try {
         await fetch(`/samples?${params}`, { method: "POST", body: s.blob });
       } catch (e) {
@@ -58,9 +77,17 @@ export class Trainer {
   async predict(frameId, blob) {
     try {
       const r = await fetch("/predict", { method: "POST", body: blob }).then((x) => x.json());
-      return { ready: !!r.ready, present: !!r.present, score: r.score ?? 0, box: r.box || null };
+      return {
+        ready: !!r.ready,
+        present: !!r.present,
+        score: r.score ?? 0,
+        box: r.box || null,
+        cls: r.cls ?? null,
+        clsName: r.clsName ?? null,
+        clsScore: r.clsScore ?? null,
+      };
     } catch {
-      return { ready: false, present: false, score: 0, box: null };
+      return { ready: false, present: false, score: 0, box: null, cls: null, clsName: null, clsScore: null };
     }
   }
 

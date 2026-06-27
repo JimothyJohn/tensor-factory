@@ -97,6 +97,89 @@ def test_concurrent_upserts_no_lost_writes(tmp_path):
 
 
 @pytest.mark.unit
+def test_default_is_single_class(tmp_path):
+    # A fresh dataset is single-class so the box-only training path is unchanged: one
+    # "object" category, and a positive upserted with no cls lands in it.
+    ds = Dataset(tmp_path)
+    assert ds.classes == ["object"]
+    ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png())
+    coco = json.loads((tmp_path / "annotations.coco.json").read_text())
+    assert coco["categories"] == [{"id": 1, "name": "object"}]
+    assert coco["annotations"][0]["category_id"] == 1
+
+
+@pytest.mark.unit
+def test_class_index_written_as_coco_category(tmp_path):
+    ds = Dataset(tmp_path)
+    ds.set_classes(["helicoil", "bolt", "washer"])
+    ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png(), cls=2)  # "washer" -> category_id 3
+    coco = json.loads((tmp_path / "annotations.coco.json").read_text())
+    assert coco["categories"] == [
+        {"id": 1, "name": "helicoil"},
+        {"id": 2, "name": "bolt"},
+        {"id": 3, "name": "washer"},
+    ]
+    assert coco["annotations"][0]["category_id"] == 3  # 0-based cls 2 -> 1-based id 3
+
+
+@pytest.mark.unit
+def test_out_of_range_class_falls_back_to_first(tmp_path):
+    ds = Dataset(tmp_path)
+    ds.set_classes(["a", "b"])
+    ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png(), cls=9)  # no such class
+    assert ds.samples[1]["cls"] == 0
+    coco = json.loads((tmp_path / "annotations.coco.json").read_text())
+    assert coco["annotations"][0]["category_id"] == 1
+
+
+@pytest.mark.unit
+def test_set_classes_drops_blanks_and_never_empties(tmp_path):
+    ds = Dataset(tmp_path)
+    ds.set_classes(["  cat ", "", "  ", "dog"])
+    assert ds.classes == ["cat", "dog"]  # trimmed, blanks removed
+    ds.set_classes([])  # empty must not leave the dataset class-less
+    assert ds.classes == ["object"]
+
+
+@pytest.mark.unit
+def test_load_reconstructs_classes_and_per_sample_class(tmp_path):
+    ds = Dataset(tmp_path)
+    ds.set_classes(["helicoil", "bolt"])
+    ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png(), cls=1)
+    ds.upsert(2, True, [0.3, 0.3, 0.4, 0.4], _png(), cls=0)
+    # a fresh Dataset over the same dir recovers names AND each box's class index
+    again = Dataset(tmp_path)
+    assert again.classes == ["helicoil", "bolt"]
+    assert again.samples[1]["cls"] == 1
+    assert again.samples[2]["cls"] == 0
+
+
+@pytest.mark.unit
+def test_non_contiguous_category_ids_map_to_dense_indices(tmp_path):
+    # A COCO imported from elsewhere may use sparse ids (1, 5, 9). They must collapse to
+    # dense 0-based indices in load order so the trained class head lines up.
+    coco = {
+        "images": [
+            {"id": 1, "file_name": "images/frame_00001.png", "width": 64, "height": 64},
+        ],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 5, "bbox": [6, 6, 12, 12]},
+        ],
+        "categories": [
+            {"id": 1, "name": "a"},
+            {"id": 5, "name": "b"},
+            {"id": 9, "name": "c"},
+        ],
+    }
+    (tmp_path / "images").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64)).save(tmp_path / "images" / "frame_00001.png")
+    (tmp_path / "annotations.coco.json").write_text(json.dumps(coco))
+    ds = Dataset(tmp_path)
+    assert ds.classes == ["a", "b", "c"]
+    assert ds.samples[1]["cls"] == 1  # category_id 5 is the 2nd category -> index 1
+
+
+@pytest.mark.unit
 def test_clear_wipes_everything(tmp_path):
     ds = Dataset(tmp_path)
     ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png())

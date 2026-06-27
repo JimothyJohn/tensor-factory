@@ -22,8 +22,17 @@ With ``presence=True`` a single global-pooled objectness logit rides alongside t
 head -- YOLO-style: sigmoid(logit) is the probability the target is present, so the runtime
 returns one box when it clears a threshold and *nothing* when it doesn't. ``forward`` then
 returns ``(box, presence_logit)``; with ``presence=False`` it returns just the box, so
-existing single-output models and their exports are unchanged. There is no class label and
-no "background" class -- absence is the low tail of one objectness score.
+existing single-output models and their exports are unchanged. Absence is the low tail of
+the objectness score, not a "background" class.
+
+With ``num_classes > 1`` a classification head (the same pooled mean+max features) rides
+alongside, emitting one logit *per class* for the single detected object -- the model is
+still single-object, it just also says *which* class that object is. ``forward`` appends
+``class_logits`` to its output tuple, exported as ``logits``; softmax-argmax at the runtime
+gives the class. ``num_classes == 1`` adds no head at all, so single-class/box-only models
+and their exports are unchanged. The output order is always ``box``, then ``presence`` (if
+any), then ``logits`` (if any); :attr:`output_names` is the authoritative contract and the
+runtime reads each output by name.
 """
 
 from __future__ import annotations
@@ -59,10 +68,17 @@ def soft_argmax_xyxy(heat, gain=1.0):  # noqa: ANN001, ANN201
 
 
 class TinyDetector(nn.Module):
-    def __init__(self, width: int = 16, presence: bool = False, learn_gain: bool = True) -> None:
+    def __init__(
+        self,
+        width: int = 16,
+        presence: bool = False,
+        learn_gain: bool = True,
+        num_classes: int = 1,
+    ) -> None:
         super().__init__()
         c = width
         self.presence = presence
+        self.num_classes = num_classes
         # 480 -> 240 -> 120 -> 60 -> 30 (4 stride-2 blocks, no final pool).
         self.features = nn.Sequential(
             _block(3, c),
@@ -85,12 +101,36 @@ class TinyDetector(nn.Module):
         # near-identical channel averages); max captures whether a discriminative texture
         # fires anywhere. sigmoid(logit) is P(target present).
         self.presence_head = nn.Linear(8 * c, 1) if presence else None
+        # Optional classification head: one logit per class for the single detected object,
+        # from the same pooled mean+max features. Only built with >1 class; a single-class
+        # detector has nothing to classify, so it adds no head and no output.
+        self.class_head = nn.Linear(8 * c, num_classes) if num_classes > 1 else None
+
+    @property
+    def output_names(self) -> list[str]:
+        """The ONNX output contract, in graph order: box, then presence, then logits.
+
+        The authoritative source for both :meth:`forward`'s tuple order and the export's
+        ``output_names`` -- the runtime reads each output by name, so the order only has to
+        be self-consistent here.
+        """
+        names = ["box"]
+        if self.presence_head is not None:
+            names.append("presence")
+        if self.class_head is not None:
+            names.append("logits")
+        return names
 
     def forward(self, x):  # noqa: ANN001, ANN201
         f = self.features(x)
         box = soft_argmax_xyxy(self.heat(f), gain=self.log_gain.exp())
+        if self.presence_head is None and self.class_head is None:
+            return box
+        # Pooled features feed both optional heads; compute once when either is present.
+        pooled = torch.cat([f.mean(dim=(2, 3)), f.amax(dim=(2, 3))], dim=1)  # B,8c
+        outs = [box]
         if self.presence_head is not None:
-            pooled = torch.cat([f.mean(dim=(2, 3)), f.amax(dim=(2, 3))], dim=1)  # B,8c
-            presence_logit = self.presence_head(pooled)  # B,1
-            return box, presence_logit
-        return box
+            outs.append(self.presence_head(pooled))  # B,1
+        if self.class_head is not None:
+            outs.append(self.class_head(pooled))  # B,num_classes
+        return tuple(outs)

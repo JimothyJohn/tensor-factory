@@ -107,3 +107,57 @@ def test_export_and_detect_presence_roundtrip(tmp_path):
     # box-only API still works on a presence-head model
     box = det.detect_box(Image.new("RGB", (64, 64), (10, 10, 10)))
     assert box.x1 <= box.x2
+
+
+@pytest.mark.unit
+def test_single_class_adds_no_class_head():
+    # num_classes == 1 is the box-only/single-class path: no class head, no logits output,
+    # forward returns exactly what it did before. Backward compatibility is the contract.
+    box_only = TinyDetector(width=8)
+    assert box_only.class_head is None
+    assert box_only.output_names == ["box"]
+    assert box_only(torch.zeros(2, 3, 64, 64)).shape == (2, 4)  # plain tensor, not a tuple
+
+    presence_only = TinyDetector(width=8, presence=True, num_classes=1)
+    assert presence_only.class_head is None
+    assert presence_only.output_names == ["box", "presence"]
+
+
+@pytest.mark.unit
+def test_multiclass_forward_shapes_and_output_names():
+    model = TinyDetector(width=8, presence=True, num_classes=3)
+    assert model.output_names == ["box", "presence", "logits"]
+    box, presence, logits = model(torch.zeros(2, 3, 64, 64))
+    assert box.shape == (2, 4)
+    assert presence.shape == (2, 1)
+    assert logits.shape == (2, 3)  # one logit per class
+
+
+@pytest.mark.unit
+def test_multiclass_without_presence_emits_box_and_logits():
+    # A class head can ride without a presence head: order is box, then logits.
+    model = TinyDetector(width=8, num_classes=4)
+    assert model.output_names == ["box", "logits"]
+    box, logits = model(torch.zeros(1, 3, 64, 64))
+    assert box.shape == (1, 4) and logits.shape == (1, 4)
+
+
+@pytest.mark.unit
+def test_export_and_detect_class_roundtrip(tmp_path):
+    model = TinyDetector(width=8, presence=True, num_classes=3)
+    out = export_onnx(model, tmp_path / "m.onnx", size=64)
+    det = Detector(out, input_size=64)
+    assert det.has_class and det.has_presence
+    idx, conf = det.detect_class(Image.new("RGB", (64, 64), (128, 128, 128)))
+    assert idx in (0, 1, 2)  # a valid 0-based class index
+    assert 0.0 <= conf <= 1.0  # softmax confidence, not a raw logit
+
+
+@pytest.mark.unit
+def test_detect_class_raises_without_class_head(tmp_path):
+    model = TinyDetector(width=8, presence=True)  # single-class: no logits output
+    out = export_onnx(model, tmp_path / "m.onnx", size=64)
+    det = Detector(out, input_size=64)
+    assert not det.has_class
+    with pytest.raises(RuntimeError, match="no class head"):
+        det.detect_class(Image.new("RGB", (64, 64), (0, 0, 0)))
