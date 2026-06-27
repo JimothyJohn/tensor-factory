@@ -9,6 +9,7 @@ import { installKeymap, renderKeymapHelp } from "./keymap.js";
 import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
 import { Trainer } from "./trainer.js";
+import { toast } from "./toast.js";
 
 const PALETTE = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa"];
 const DEFAULT_CLASSES = [{ name: "object", color: PALETTE[0] }];
@@ -143,23 +144,48 @@ function renderCounts() {
 async function ingest(file) {
   const fps = parseFloat($("fpsInput").value) || 1;
   const minDistance = parseInt($("minDistInput").value, 10) || 6;
-  const known = await state.store.allHashes();
-  $("ingestStatus").textContent = "ingesting…";
+  const input = $("videoInput");
+  input.disabled = true;
+  const prog = toast.progress(`Decoding "${file.name}"…`);
+  $("ingestStatus").textContent = `decoding "${file.name}"…`;
   let kept = 0;
   let seen = 0;
-  for await (const ev of extractFrames(file, { fps, minDistance, knownHashes: known })) {
-    seen++;
-    if (ev.kept) {
-      await state.store.addFrame({ ...ev.frame, addedAt: Date.now() });
-      kept++;
+  try {
+    const known = await state.store.allHashes();
+    for await (const ev of extractFrames(file, { fps, minDistance, knownHashes: known })) {
+      seen++;
+      if (ev.kept) {
+        await state.store.addFrame({ ...ev.frame, addedAt: Date.now() });
+        kept++;
+      }
+      const pct = ev.total ? Math.min(100, Math.round(((ev.index + 1) / ev.total) * 100)) : 0;
+      const msg = `Sampling frames… ${pct}% · ${kept} kept, ${seen - kept} skipped`;
+      prog.update(msg);
+      $("ingestStatus").textContent = msg;
     }
-    $("ingestStatus").textContent = `ingesting… ${seen} sampled, ${kept} kept (deduped ${seen - kept})`;
-  }
-  $("ingestStatus").textContent = `done: ${kept} novel frames added, ${seen - kept} skipped as duplicates`;
-  await refreshFrames();
-  if (state.frames.length) {
-    state.index = Math.max(0, state.frames.length - kept);
-    await loadCurrent();
+    if (seen === 0) {
+      prog.error("No frames were sampled — the video may be empty or unreadable.");
+      $("ingestStatus").textContent = "no frames sampled";
+      return;
+    }
+    await refreshFrames();
+    if (kept === 0) {
+      const m = `All ${seen} sampled frames matched existing ones — nothing new added. Lower "dedup" to keep more.`;
+      prog.success(m);
+      $("ingestStatus").textContent = m;
+    } else {
+      const m = `Added ${kept} new frame${kept === 1 ? "" : "s"} (skipped ${seen - kept} duplicate${seen - kept === 1 ? "" : "s"}).`;
+      prog.success(m);
+      $("ingestStatus").textContent = m;
+      state.index = Math.max(0, state.frames.length - kept);
+      await loadCurrent();
+    }
+  } catch (e) {
+    const m = `Couldn't load "${file.name}": ${e.message}`;
+    prog.error(m);
+    $("ingestStatus").textContent = m;
+  } finally {
+    input.disabled = false;
   }
 }
 
@@ -175,10 +201,16 @@ async function doExport() {
   await saveWorking();
   try {
     const r = await exportDataset(state.frames, state.labels, state.classes);
-    $("ingestStatus").textContent = `exported ${r.positives} positives (${r.annotations} boxes), ${r.negatives} negatives`;
+    if (r.positives === 0 && r.negatives === 0) {
+      toast.info("Nothing to export yet — commit some labels first (approved frames only).");
+      return;
+    }
+    const m = `Exported ${r.positives} positives (${r.annotations} boxes), ${r.negatives} negatives.`;
+    $("ingestStatus").textContent = m;
+    toast.success(m);
   } catch (e) {
     if (e.name === "AbortError") return; // user cancelled the picker
-    $("ingestStatus").textContent = `export failed: ${e.message}`;
+    toast.error(`Dataset export failed: ${e.message}`);
   }
 }
 
@@ -326,6 +358,7 @@ async function main() {
   trainer = new Trainer({
     onReady: (m) => {
       $("backendTag").textContent = m.backend;
+      toast.success(`Backend connected — training on ${m.backend.toUpperCase()}.`);
       trainer.resume();
     },
     onMetrics: renderMetrics,
@@ -335,7 +368,9 @@ async function main() {
       el.textContent = text;
     },
     onError: (text) => {
-      $("ingestStatus").textContent = "trainer error: " + text;
+      // de-duped by the toast layer, so a failing poll loop shows one message, not 50
+      toast.error(`Backend: ${text}`);
+      $("backendTag").textContent = "offline";
     },
   });
   trainer.init();
@@ -376,7 +411,7 @@ async function main() {
     try {
       const res = await fetch("/model");
       if (!res.ok) {
-        $("ingestStatus").textContent = "no trained model yet";
+        toast.info("No trained model yet — label a few frames first.");
         return;
       }
       const blob = await res.blob();
@@ -385,9 +420,11 @@ async function main() {
       a.download = "tinydetector.onnx";
       a.click();
       URL.revokeObjectURL(a.href);
-      $("ingestStatus").textContent = `model exported (int8 ONNX, ${(blob.size / 1024).toFixed(0)} KB)`;
+      const m = `Model exported (int8 ONNX, ${(blob.size / 1024).toFixed(0)} KB).`;
+      $("ingestStatus").textContent = m;
+      toast.success(m);
     } catch (e) {
-      $("ingestStatus").textContent = "model export failed: " + e.message;
+      toast.error("Model export failed: " + e.message);
     }
   });
   $("pauseBtn").addEventListener("click", () => {
@@ -408,6 +445,7 @@ async function main() {
     await refreshFrames();
     await loadCurrent();
     $("ingestStatus").textContent = "session cleared";
+    toast.info("Session cleared — frames, labels, and trainer state wiped.");
   });
 
   await refreshFrames();

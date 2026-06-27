@@ -73,6 +73,30 @@ def test_recent_returns_ids_added_after_snapshot(tmp_path):
 
 
 @pytest.mark.unit
+def test_concurrent_upserts_no_lost_writes(tmp_path):
+    # The real thread-safety invariant the server relies on: N threads upserting distinct
+    # frames at once must all land (Dataset serializes writes with a lock). Tested directly,
+    # not through the HTTP layer, so connection limits can't make it flaky.
+    import concurrent.futures
+
+    ds = Dataset(tmp_path)
+    n = 40
+    png = _png()
+
+    def put(i):
+        ds.upsert(i, True, [0.1, 0.1, 0.2, 0.2], png)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(put, range(n)))
+
+    assert ds.counts() == {"positives": n, "negatives": 0, "total": n}
+    # every image file and the reconstructed view agree
+    assert len(list((tmp_path / "images").glob("frame_*.png"))) == n
+    again = Dataset(tmp_path)
+    assert again.counts()["total"] == n
+
+
+@pytest.mark.unit
 def test_clear_wipes_everything(tmp_path):
     ds = Dataset(tmp_path)
     ds.upsert(1, True, [0.1, 0.1, 0.2, 0.2], _png())

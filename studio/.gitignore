@@ -1,2 +1,3 @@
 # backend dataset + trained models (server-owned, not source)
 .data/
+node_modules/

@@ -5,14 +5,51 @@
 
 import { dhash, isNovel } from "./dhash.js";
 
+const LOAD_TIMEOUT_MS = 20000;
+
+// Turn a MediaError into something a human can act on.
+export function mediaErrorMessage(video) {
+  const err = video.error;
+  const codes = {
+    1: "loading was aborted",
+    2: "a network error occurred",
+    3: "the video could not be decoded (codec unsupported by this browser)",
+    4: "this video format is not supported (try MP4/H.264, WebM, or convert with ffmpeg)",
+  };
+  return (err && codes[err.code]) || "the browser could not open this file as a video";
+}
+
 function loadVideo(file) {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.preload = "auto";
     video.muted = true;
+    let settled = false;
+    const fail = (msg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(video.src);
+      reject(new Error(msg));
+    };
+    // No metadata and no error within the window: usually a format the browser is
+    // silently refusing to decode. Fail loud instead of hanging forever.
+    const timer = setTimeout(
+      () => fail("timed out opening the video (the format may be unsupported)"),
+      LOAD_TIMEOUT_MS,
+    );
+    video.onerror = () => fail(mediaErrorMessage(video));
+    video.onloadedmetadata = () => {
+      if (settled) return;
+      if (!video.videoWidth || !video.videoHeight) {
+        fail("the video has no visual track (audio-only or zero-size frames)");
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(video);
+    };
     video.src = URL.createObjectURL(file);
-    video.onloadedmetadata = () => resolve(video);
-    video.onerror = () => reject(new Error("could not load video"));
   });
 }
 
@@ -82,7 +119,7 @@ export async function* extractFrames(file, { fps = 1, minDistance = 6, knownHash
   const duration = await resolveDuration(video);
   if (!duration) {
     URL.revokeObjectURL(video.src);
-    return;
+    throw new Error("could not determine the video's length (it may be corrupt or truncated)");
   }
   await seek(video, 0); // rewind after the duration-coercion seek
   const total = Math.max(1, Math.floor(duration / step));

@@ -225,6 +225,11 @@ def _make_handler(
     return Handler
 
 
+class _StudioServer(ThreadingHTTPServer):
+    daemon_threads = True  # don't let in-flight requests block process exit
+    request_queue_size = 64  # tolerate short bursts of connections without dropping SYNs
+
+
 def make_server(
     host: str,
     port: int,
@@ -236,7 +241,7 @@ def make_server(
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> ThreadingHTTPServer:
     handler = _make_handler(dataset, trainer, Path(ui_dir).resolve(), input_size, max_bytes)
-    return ThreadingHTTPServer((host, port), handler)
+    return _StudioServer((host, port), handler)
 
 
 def serve(

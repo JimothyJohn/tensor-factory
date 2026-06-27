@@ -165,3 +165,61 @@ def test_handler_exception_becomes_500_not_empty_response(tmp_path, monkeypatch)
         assert b"boom" in exc.value.read()
     finally:
         httpd.shutdown()
+
+
+# --- adversarial input: the HTTP surface must never 500/hang on bad input ---
+
+
+@pytest.mark.unit
+def test_malformed_image_body_is_400_not_500(server):
+    base, ds = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/samples?id=1&present=1&box=0,0,0.5,0.5", b"not a real png")
+    assert exc.value.code == 400
+    assert ds.counts()["total"] == 0  # nothing persisted from a bad upload
+
+
+@pytest.mark.unit
+def test_non_integer_id_is_400(server):
+    base, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/samples?id=abc&present=0", _png())
+    assert exc.value.code == 400
+
+
+@pytest.mark.unit
+def test_empty_body_is_rejected(server):
+    base, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/samples?id=1&present=0", b"")
+    assert exc.value.code in (400, 411)
+
+
+@pytest.mark.unit
+def test_oversized_body_is_413(tmp_path):
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("x", encoding="utf-8")
+    ds = Dataset(tmp_path / "data")
+    tr = Trainer(ds, tmp_path / "data" / "models")
+    httpd = make_server(
+        "127.0.0.1", 0, dataset=ds, trainer=tr, ui_dir=ui, input_size=480, max_bytes=16
+    )
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        with pytest.raises(HTTPError) as exc:
+            _post(f"http://127.0.0.1:{port}", "/samples?id=1&present=0", b"x" * 1000)
+        assert exc.value.code == 413
+    finally:
+        httpd.shutdown()
+
+
+@pytest.mark.unit
+def test_head_request_on_index(server):
+    base, _ = server
+    req = urllib.request.Request(f"{base}/", method="HEAD")
+    with urllib.request.urlopen(req) as r:
+        assert r.status == 200
+        assert r.read() == b""  # HEAD has no body

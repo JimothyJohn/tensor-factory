@@ -32,6 +32,7 @@ Description:
 Options:
   -h, --help        Display this help message and exit
   -c, --check       Run the full local gate: install -> lint+format -> types -> unit
+                    (Python pytest + Studio JS node --test)
   -u, --unit-test   Run unit tests only
   -p, --publish     Run the full gate, then build and publish to PyPI
   -s, --studio      Serve Tensor Factory Studio (labeling UI + continuous trainer)
@@ -131,6 +132,22 @@ test_unit() {
     return 0
 }
 
+test_js() {
+    # Studio's browser modules: pure-logic unit tests via Node's built-in runner
+    # (zero deps -- no npm/jest/vitest). Browser-DOM behaviour is covered by the
+    # Playwright e2e under studio/e2e. Skipped (not failed) if node is absent.
+    if ! command_exists node; then
+        log "node not found -- skipping JS unit tests (install Node to run them)"
+        return 0
+    fi
+    log "Running Studio JS unit tests (node --test)..."
+    if ! node --test studio/tests/*.test.mjs; then
+        log "ERROR: JS unit tests failed"
+        return 1
+    fi
+    return 0
+}
+
 publish() {
     log "Building distributions"
     if ! uv build --all-packages; then
@@ -163,6 +180,7 @@ main() {
             -c|--check)
                 validate_and_build || { log "Validation failed"; exit 1; }
                 test_unit || { log "Unit tests failed"; exit 1; }
+                test_js || { log "JS unit tests failed"; exit 1; }
                 log "All checks passed."
                 exit 0
                 ;;
