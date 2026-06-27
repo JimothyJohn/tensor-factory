@@ -15,7 +15,7 @@
           Load video
         </label>
         <label class="field">fps <input id="fpsInput" type="number" min="0.1" step="0.1" value="1" /></label>
-        <label class="field">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="6" /></label>
+        <label class="field" title="Minimum dHash bits (of 64) two frames must differ by to both be kept. Higher = more discriminatory, fewer near-duplicate frames.">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="12" /></label>
         <label
           class="toggle"
           title="Run the trained model on each new frame to pre-fill a box (you still confirm with Space/W). Off by default so unreviewed machine guesses never enter the dataset."

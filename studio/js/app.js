@@ -24,6 +24,7 @@ const state = {
   activeClass: 0,
   index: 0,
   bitmap: null,
+  lastBox: null, // last committed positive box, carried forward to prime the next frame
 };
 
 function emptyLabel(frameId) {
@@ -61,6 +62,11 @@ async function saveWorking(review) {
 // --- navigation ------------------------------------------------------------
 async function go(delta, { commit = null } = {}) {
   const fid = currentFrame()?.id;
+  // Remember the box you just committed so it can prime the next frame (video tracking).
+  if (commit === "approved") {
+    const boxes = editor.getBoxes();
+    if (boxes.length) state.lastBox = { ...boxes[0] };
+  }
   await saveWorking(commit);
   if (fid != null && (commit === "approved" || commit === "negative")) pushSample(fid);
   const n = state.frames.length;
@@ -82,7 +88,7 @@ async function loadCurrent() {
   const label = currentLabel();
   editor.setFrame(state.bitmap, label.boxes);
   renderStatus();
-  autoLabel();
+  suggest();
 }
 
 // --- class selection -------------------------------------------------------
@@ -143,7 +149,7 @@ function renderCounts() {
 // --- ingest ----------------------------------------------------------------
 async function ingest(file) {
   const fps = parseFloat($("fpsInput").value) || 1;
-  const minDistance = parseInt($("minDistInput").value, 10) || 6;
+  const minDistance = parseInt($("minDistInput").value, 10) || 12;
   const input = $("videoInput");
   input.disabled = true;
   const prog = toast.progress(`Decoding "${file.name}"…`);
@@ -233,6 +239,24 @@ function pushSample(frameId) {
 
 function autoLabelEnabled() {
   return !!$("autoLabelToggle")?.checked;
+}
+
+// Prime each new frame from the previous one: carry the last committed box forward
+// (instant, works from frame 1 since consecutive video frames barely move). Only when
+// nothing has been committed yet do we fall back to the trained model's guess. Gated by
+// the same opt-in toggle, so with auto-label off you get a fully manual, no-surprise pass.
+async function suggest() {
+  if (!autoLabelEnabled()) return;
+  const f = currentFrame();
+  if (!f) return;
+  const label = currentLabel();
+  if (label.review === "approved" || editor.getBoxes().length) return;
+  if (state.lastBox) {
+    editor.setFrame(state.bitmap, [{ ...state.lastBox }]);
+    setAuto("box carried from previous frame · drag to adjust, Space to accept, C if gone");
+    return;
+  }
+  await autoLabel(); // nothing to carry yet — let the model suggest
 }
 
 // Ask the trainer to pre-fill an unlabeled frame with its prediction.
@@ -496,6 +520,7 @@ async function main() {
     await state.store.clearAll();
     trainer.reset();
     setAuto("");
+    state.lastBox = null;
     state.index = 0;
     await refreshFrames();
     await loadCurrent();
