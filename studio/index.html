@@ -16,6 +16,13 @@
         </label>
         <label class="field">fps <input id="fpsInput" type="number" min="0.1" step="0.1" value="1" /></label>
         <label class="field">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="6" /></label>
+        <label
+          class="toggle"
+          title="Run the trained model on each new frame to pre-fill a box (you still confirm with Space/W). Off by default so unreviewed machine guesses never enter the dataset."
+        >
+          <input type="checkbox" id="autoLabelToggle" />
+          auto-label
+        </label>
         <button class="btn" id="exportBtn">Export dataset</button>
         <button class="btn" id="exportModelBtn">Export model</button>
         <button class="btn ghost" id="clearBtn">Clear session</button>

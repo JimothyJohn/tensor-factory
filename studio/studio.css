@@ -81,6 +81,24 @@ h1 span {
   padding: 5px 6px;
 }
 
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+.toggle:has(input:checked) {
+  color: var(--accent);
+}
+
 main {
   display: grid;
   grid-template-columns: 1fr 320px;

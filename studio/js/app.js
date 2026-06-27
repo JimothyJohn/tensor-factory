@@ -231,8 +231,15 @@ function pushSample(frameId) {
   if (s) trainer.upsert([s]);
 }
 
+function autoLabelEnabled() {
+  return !!$("autoLabelToggle")?.checked;
+}
+
 // Ask the trainer to pre-fill an unlabeled frame with its prediction.
+// Opt-in only: when the toggle is off, no machine guess ever appears, so the user can't
+// accept an unreviewed box by reflex and corrupt the training set.
 async function autoLabel() {
+  if (!autoLabelEnabled()) return;
   const f = currentFrame();
   if (!trainer || !trainer.ready || !f) return;
   const label = currentLabel();
@@ -427,6 +434,26 @@ async function main() {
       }
     },
     cancel: () => editor.cancelDraw(),
+  });
+
+  // auto-label opt-in: off by default, remembered across reloads
+  const autoToggle = $("autoLabelToggle");
+  try {
+    autoToggle.checked = localStorage.getItem("studio.autoLabel") === "1";
+  } catch {
+    /* storage unavailable */
+  }
+  autoToggle.addEventListener("change", () => {
+    try {
+      localStorage.setItem("studio.autoLabel", autoToggle.checked ? "1" : "0");
+    } catch {
+      /* non-fatal */
+    }
+    if (autoToggle.checked) {
+      autoLabel(); // pre-fill the current frame right away
+    } else {
+      setAuto(""); // clear any pending suggestion text
+    }
   });
 
   $("videoInput").addEventListener("change", (e) => {

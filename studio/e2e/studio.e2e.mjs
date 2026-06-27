@@ -66,6 +66,22 @@ try {
     assert.equal(await page.locator("#emptyHint").isVisible(), false);
   });
 
+  await step("auto-label is opt-in: off by default shows no machine guess", async () => {
+    assert.equal(await page.locator("#autoLabelToggle").isChecked(), false);
+    await page.keyboard.press("d"); // move to another unlabeled frame
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator("#autoBadge").textContent(), "");
+  });
+
+  await step("enabling auto-label turns on per-frame suggestions", async () => {
+    await page.check("#autoLabelToggle");
+    // current frame is unlabeled+empty -> autoLabel runs (no model yet => 'warming up')
+    await page.waitForFunction(() => document.getElementById("autoBadge").textContent.length > 0, null, {
+      timeout: 8000,
+    });
+    await page.uncheck("#autoLabelToggle"); // back off so the labeling step draws cleanly
+  });
+
   await step("garbage file shows an error toast and does not hang", async () => {
     await page.setInputFiles("#videoInput", GARBAGE);
     const toast = await page.waitForSelector("#toasts .toast-error", { timeout: 30000 });
