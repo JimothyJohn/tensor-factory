@@ -50,11 +50,38 @@ test("upsert surfaces network failure via onError, doesn't throw", async () => {
   assert.match(errors[0], /down/);
 });
 
-test("predict parses the backend shape", async () => {
-  stubFetch(async () => ({ json: async () => ({ ready: true, present: true, score: 0.87, box: [0, 0, 1, 1] }) }));
+test("predict parses the backend shape including class fields", async () => {
+  stubFetch(async () => ({
+    json: async () => ({
+      ready: true,
+      present: true,
+      score: 0.87,
+      box: [0, 0, 1, 1],
+      cls: 2,
+      clsName: "washer",
+      clsScore: 0.91,
+    }),
+  }));
   const t = new Trainer({});
   const r = await t.predict(3, "B");
-  assert.deepEqual(r, { ready: true, present: true, score: 0.87, box: [0, 0, 1, 1] });
+  assert.deepEqual(r, {
+    ready: true,
+    present: true,
+    score: 0.87,
+    box: [0, 0, 1, 1],
+    cls: 2,
+    clsName: "washer",
+    clsScore: 0.91,
+  });
+});
+
+test("predict defaults class fields to null for single-class models", async () => {
+  stubFetch(async () => ({ json: async () => ({ ready: true, present: true, score: 0.5, box: [0, 0, 1, 1] }) }));
+  const t = new Trainer({});
+  const r = await t.predict(3, "B");
+  assert.equal(r.cls, null);
+  assert.equal(r.clsName, null);
+  assert.equal(r.clsScore, null);
 });
 
 test("predict resolves to not-ready on fetch failure (never throws)", async () => {
@@ -63,7 +90,50 @@ test("predict resolves to not-ready on fetch failure (never throws)", async () =
   };
   const t = new Trainer({});
   const r = await t.predict(1, "B");
-  assert.deepEqual(r, { ready: false, present: false, score: 0, box: null });
+  assert.deepEqual(r, {
+    ready: false,
+    present: false,
+    score: 0,
+    box: null,
+    cls: null,
+    clsName: null,
+    clsScore: null,
+  });
+});
+
+test("upsert sends the class index on positives", async () => {
+  const calls = stubFetch(async () => ({ ok: true, json: async () => ({}) }));
+  const t = new Trainer({});
+  await t.upsert([{ frameId: 4, blob: "B", box: [0.1, 0.2, 0.3, 0.4], present: 1, cls: 2 }]);
+  const u = new URL("http://x" + calls[0].url);
+  assert.equal(u.searchParams.get("cls"), "2");
+});
+
+test("upsert omits cls on negatives", async () => {
+  const calls = stubFetch(async () => ({ ok: true, json: async () => ({}) }));
+  const t = new Trainer({});
+  await t.upsert([{ frameId: 5, blob: "B", box: null, present: 0, cls: 3 }]);
+  const u = new URL("http://x" + calls[0].url);
+  assert.equal(u.searchParams.has("cls"), false);
+});
+
+test("setClasses POSTs the class list as JSON and returns the server's list", async () => {
+  const calls = stubFetch(async () => ({ ok: true, json: async () => ({ classes: ["a", "b"] }) }));
+  const t = new Trainer({});
+  const out = await t.setClasses(["a", "b"]);
+  assert.equal(calls[0].url, "/classes");
+  assert.equal(calls[0].opts.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].opts.body), { classes: ["a", "b"] });
+  assert.deepEqual(out, ["a", "b"]);
+});
+
+test("setClasses surfaces a failure via onError and returns null", async () => {
+  stubFetch(async () => ({ ok: false, status: 400, json: async () => ({}) }));
+  const errors = [];
+  const t = new Trainer({ onError: (m) => errors.push(m) });
+  const out = await t.setClasses(["x"]);
+  assert.equal(out, null);
+  assert.equal(errors.length, 1);
 });
 
 test("pause/resume hit their endpoints and flip running", async () => {
