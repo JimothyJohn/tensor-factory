@@ -8,9 +8,11 @@ dev box is not public-by-default.
 Routes:
   ``GET  /``, ``/<static>``  -> the Studio UI files
   ``GET  /metrics``          -> latest training metrics (polled by the UI)
-  ``GET  /status``           -> device, running flag, dataset counts
+  ``GET  /status``           -> device, running flag, dataset counts, class list
   ``GET  /model``            -> download the served int8 ONNX
-  ``POST /samples?id&present&box``  -> body = raw PNG; add/replace a labeled frame
+  ``GET  /classes``          -> the ordered class list
+  ``POST /samples?id&present&box&cls``  -> body = raw PNG; add/replace a labeled frame
+  ``POST /classes``          -> body = {"classes": [...]}; set the ordered class list
   ``POST /predict``          -> body = raw PNG; auto-label with the best served model
   ``POST /reset``            -> wipe the dataset and trainer state
   ``POST /pause`` / ``/resume`` -> gate the training loop
@@ -45,7 +47,9 @@ def _detector(model_path: str, input_size: int):
     return Detector(model_path, input_size=input_size)
 
 
-def _predict(model_path: str, input_size: int, png: bytes) -> dict[str, Any]:
+def _predict(
+    model_path: str, input_size: int, png: bytes, classes: list[str] | None = None
+) -> dict[str, Any]:
     import io
 
     from PIL import Image
@@ -56,10 +60,25 @@ def _predict(model_path: str, input_size: int, png: bytes) -> dict[str, Any]:
         score = det.detect_presence(img) if det.has_presence else 1.0
         present = score >= 0.5
         box = None
+        cls = None
+        cls_name = None
+        cls_score = None
         if present:
             b = det.detect_box(img)
             box = [b.x1, b.y1, b.x2, b.y2]
-    return {"ready": True, "present": present, "score": score, "box": box}
+            if det.has_class:
+                cls, cls_score = det.detect_class(img)
+                if classes and 0 <= cls < len(classes):
+                    cls_name = classes[cls]
+    return {
+        "ready": True,
+        "present": present,
+        "score": score,
+        "box": box,
+        "cls": cls,
+        "clsName": cls_name,
+        "clsScore": cls_score,
+    }
 
 
 def _make_handler(
@@ -144,8 +163,11 @@ def _make_handler(
                         "running": not trainer.paused,
                         "hasModel": trainer.served is not None,
                         "counts": dataset.counts(),
+                        "classes": list(dataset.classes),
                     },
                 )
+            elif route == "/classes":
+                self._json(200, {"classes": list(dataset.classes)})
             elif route == "/model":
                 if trainer.served is None:
                     self._json(404, {"error": "no model trained yet"})
@@ -169,6 +191,8 @@ def _make_handler(
                 self._post_samples()
             elif route == "/predict":
                 self._post_predict()
+            elif route == "/classes":
+                self._post_classes()
             elif route == "/reset":
                 dataset.clear()
                 trainer.reset()
@@ -199,16 +223,37 @@ def _make_handler(
                 except ValueError:
                     self._json(400, {"error": "box must be x1,y1,x2,y2"})
                     return
+            try:
+                cls = int(q.get("cls", ["0"])[0])
+            except ValueError:
+                self._json(400, {"error": "cls must be an integer index"})
+                return
             body = self._read_body()
             if body is None:
                 return
             try:
-                dataset.upsert(fid, present, box, body)
+                dataset.upsert(fid, present, box, body, cls=cls)
             except Exception as exc:  # noqa: BLE001 -- bad image -> 400
                 self._json(400, {"error": f"could not store sample: {type(exc).__name__}"})
                 return
             trainer.mark_dirty()
             self._json(200, {"ok": True, "counts": dataset.counts()})
+
+        def _post_classes(self) -> None:
+            body = self._read_body()
+            if body is None:
+                return
+            try:
+                payload = json.loads(body)
+                names = payload["classes"]
+                if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+                    raise ValueError
+            except (ValueError, KeyError, TypeError):
+                self._json(400, {"error": 'body must be {"classes": ["name", ...]}'})
+                return
+            dataset.set_classes(names)
+            trainer.mark_dirty()  # categories changed -> retrain so the class head matches
+            self._json(200, {"ok": True, "classes": list(dataset.classes)})
 
         def _post_predict(self) -> None:
             body = self._read_body()
@@ -218,7 +263,10 @@ def _make_handler(
                 self._json(200, {"ready": False})
                 return
             try:
-                self._json(200, _predict(str(trainer.served), input_size, body))
+                self._json(
+                    200,
+                    _predict(str(trainer.served), input_size, body, list(dataset.classes)),
+                )
             except Exception as exc:  # noqa: BLE001
                 self._json(400, {"error": f"predict failed: {type(exc).__name__}"})
 

@@ -93,6 +93,62 @@ function setActiveClass(i, reassignSelected) {
   renderClasses();
 }
 
+// Persist the class list to IndexedDB and push it to the backend (which rewrites the COCO
+// categories and retrains so the class head matches the new taxonomy). The browser is the
+// source of truth for the ordered class list; indices are the contract with stored boxes.
+async function persistClasses() {
+  editor.setClasses(state.classes);
+  renderClasses();
+  await state.store.metaSet("classes", state.classes);
+  if (trainer) await trainer.setClasses(state.classes.map((c) => c.name));
+}
+
+function addClass(name) {
+  const n = (name || "").trim();
+  if (!n) return;
+  if (state.classes.some((c) => c.name.toLowerCase() === n.toLowerCase())) {
+    toast.info(`Class "${n}" already exists.`);
+    return;
+  }
+  const color = PALETTE[state.classes.length % PALETTE.length];
+  state.classes = [...state.classes, { name: n, color }];
+  setActiveClass(state.classes.length - 1, false);
+  persistClasses();
+}
+
+async function importClassesFromCoco(file) {
+  try {
+    const coco = JSON.parse(await file.text());
+    const cats = (coco.categories || []).slice().sort((a, b) => a.id - b.id);
+    if (!cats.length) {
+      toast.error(`No "categories" found in "${file.name}".`);
+      return;
+    }
+    state.classes = cats.map((c, i) => ({ name: c.name, color: PALETTE[i % PALETTE.length] }));
+    setActiveClass(0, false);
+    await persistClasses();
+    toast.success(`Imported ${state.classes.length} classes from "${file.name}".`);
+  } catch (e) {
+    toast.error(`Couldn't read classes from "${file.name}": ${e.message}`);
+  }
+}
+
+// Reconcile the browser's class list with the backend on connect. A fresh browser (only the
+// default "object" class) adopts a pre-populated backend's taxonomy; otherwise the browser
+// wins and pushes its list down. Keeps the two from silently disagreeing on indices.
+async function syncClasses(backendNames) {
+  const isDefault = state.classes.length === 1 && state.classes[0].name === "object";
+  if (isDefault && Array.isArray(backendNames) && backendNames.length > 1) {
+    state.classes = backendNames.map((n, i) => ({ name: n, color: PALETTE[i % PALETTE.length] }));
+    setActiveClass(0, false);
+    editor.setClasses(state.classes);
+    renderClasses();
+    await state.store.metaSet("classes", state.classes);
+  } else if (trainer) {
+    await trainer.setClasses(state.classes.map((c) => c.name));
+  }
+}
+
 // --- rendering -------------------------------------------------------------
 function renderClasses() {
   const row = $("classRow");
@@ -222,7 +278,13 @@ function sampleFor(frameId) {
   if (!f || !l || l.review !== "approved") return null;
   const present = l.present && l.boxes.length ? 1 : 0;
   const b = present ? l.boxes[0] : null;
-  return { frameId, blob: f.blob, box: b ? [b.x1, b.y1, b.x2, b.y2] : null, present };
+  return {
+    frameId,
+    blob: f.blob,
+    box: b ? [b.x1, b.y1, b.x2, b.y2] : null,
+    cls: b ? (b.cls ?? 0) : 0,
+    present,
+  };
 }
 
 function pushSample(frameId) {
@@ -255,8 +317,14 @@ async function autoLabel() {
   }
   if (pred.present) {
     const [x1, y1, x2, y2] = pred.box;
-    editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls: state.activeClass }]);
-    setAuto(`auto-label · score ${pred.score.toFixed(2)} · Space to accept, drag to fix`);
+    // Adopt the model's predicted class when it has a class head; fall back to the active
+    // class for single-class models. Make it the active class so the chip + Space-accept agree.
+    const cls = pred.cls != null && pred.cls < state.classes.length ? pred.cls : state.activeClass;
+    if (pred.cls != null) setActiveClass(cls, false);
+    editor.setFrame(state.bitmap, [{ x1, y1, x2, y2, cls }]);
+    const clsTxt =
+      pred.clsName != null ? ` · ${pred.clsName} ${((pred.clsScore ?? 0) * 100).toFixed(0)}%` : "";
+    setAuto(`auto-label · score ${pred.score.toFixed(2)}${clsTxt} · Space to accept, drag to fix`);
   } else {
     setAuto(`model sees no object · score ${pred.score.toFixed(2)} · C to confirm empty`);
   }
@@ -394,6 +462,7 @@ async function main() {
     onReady: (m) => {
       $("backendTag").textContent = m.backend;
       toast.success(`Backend connected — training on ${m.backend.toUpperCase()}.`);
+      syncClasses(m.classes);
       trainer.resume();
     },
     onMetrics: renderMetrics,
@@ -454,6 +523,25 @@ async function main() {
     } else {
       setAuto(""); // clear any pending suggestion text
     }
+  });
+
+  // class management: add by button/Enter, import names from a COCO file
+  $("addClassBtn").addEventListener("click", () => {
+    const input = $("newClassInput");
+    addClass(input.value);
+    input.value = "";
+    input.focus();
+  });
+  $("newClassInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      $("addClassBtn").click();
+    }
+  });
+  $("importClassesInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) importClassesFromCoco(file);
+    e.target.value = "";
   });
 
   $("videoInput").addEventListener("change", (e) => {

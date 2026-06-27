@@ -78,8 +78,8 @@ def load_coco_labeled(
 
 
 def baseline_center_err(
-    train_items: Sequence[tuple[Path, BBox | None]],
-    val_items: Sequence[tuple[Path, BBox | None]],
+    train_items: Sequence[tuple],
+    val_items: Sequence[tuple],
     size: int,
 ) -> float | None:
     """Median center error (px) of the *constant predictor*: always emit the mean
@@ -99,8 +99,9 @@ def baseline_center_err(
     def center(b: BBox) -> tuple[float, float]:
         return (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
 
-    train_c = [center(b) for _, b in train_items if b is not None]
-    val_c = [center(b) for _, b in val_items if b is not None]
+    # Items may be (path, box) or (path, box, label) -- index the box, don't unpack.
+    train_c = [center(it[1]) for it in train_items if it[1] is not None]
+    val_c = [center(it[1]) for it in val_items if it[1] is not None]
     if not train_c or not val_c:
         return None
     mcx = sum(cx for cx, _ in train_c) / len(train_c)
