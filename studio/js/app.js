@@ -189,6 +189,80 @@ function renderStatus() {
   }
   $("emptyHint").style.display = n ? "none" : "flex";
   renderCounts();
+  renderGallery();
+}
+
+// --- gallery preview -------------------------------------------------------
+// A small strip under the editor showing only annotated frames (those carrying at
+// least one committed box). Click a thumbnail to jump to that frame. Object URLs are
+// cached per frame and revoked on clear so a long session doesn't leak blobs.
+const galleryURLs = new Map(); // frameId -> objectURL
+let lastGallerySig = "";
+
+function annotatedFrames() {
+  return state.frames.filter((f) => {
+    const l = state.labels.get(f.id);
+    return l && l.present && l.boxes && l.boxes.length > 0;
+  });
+}
+
+function galleryURL(frame) {
+  let url = galleryURLs.get(frame.id);
+  if (!url) {
+    url = URL.createObjectURL(frame.blob);
+    galleryURLs.set(frame.id, url);
+  }
+  return url;
+}
+
+function revokeGalleryURLs() {
+  for (const url of galleryURLs.values()) URL.revokeObjectURL(url);
+  galleryURLs.clear();
+  lastGallerySig = "";
+}
+
+function renderGallery() {
+  const strip = $("gallery");
+  if (!strip) return;
+  const items = annotatedFrames();
+  const activeId = currentFrame()?.id;
+  $("galleryCount").textContent = items.length ? `${items.length}` : "";
+  // Only rebuild the thumbnails when the annotated set (or any box count) changes —
+  // navigation and drag edits just re-toggle the active highlight, which stays cheap.
+  const sig = items.map((f) => `${f.id}:${state.labels.get(f.id).boxes.length}`).join(",");
+  if (sig !== lastGallerySig) {
+    lastGallerySig = sig;
+    strip.innerHTML = "";
+    if (!items.length) {
+      strip.classList.add("empty");
+      strip.innerHTML = `<span class="gallery-empty">Annotated frames will appear here.</span>`;
+    } else {
+      strip.classList.remove("empty");
+      for (const f of items) {
+        const btn = document.createElement("button");
+        btn.className = "thumb";
+        btn.dataset.fid = f.id;
+        btn.title = `frame ${f.id}`;
+        const img = document.createElement("img");
+        img.src = galleryURL(f);
+        img.alt = `frame ${f.id}`;
+        img.loading = "lazy";
+        btn.appendChild(img);
+        const n = state.labels.get(f.id).boxes.length;
+        if (n > 1) {
+          const tag = document.createElement("span");
+          tag.className = "thumb-tag";
+          tag.textContent = `${n}`;
+          btn.appendChild(tag);
+        }
+        btn.onclick = () => jumpToFrame(f.id);
+        strip.appendChild(btn);
+      }
+    }
+  }
+  for (const el of strip.querySelectorAll(".thumb")) {
+    el.classList.toggle("active", Number(el.dataset.fid) === activeId);
+  }
 }
 
 function renderCounts() {
@@ -671,6 +745,7 @@ async function main() {
     if (!confirm("Wipe all frames and labels from this session?")) return;
     await state.store.clearAll();
     trainer.reset();
+    revokeGalleryURLs();
     setAuto("");
     state.lastBox = null;
     state.index = 0;

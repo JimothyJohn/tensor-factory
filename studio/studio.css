@@ -244,6 +244,74 @@ main {
   min-height: 16px;
 }
 
+/* gallery preview — a horizontal strip of annotated frames under the editor */
+.gallery-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 4px 0 6px;
+}
+.gallery-head small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.gallery {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-height: 84px;
+  align-items: center;
+}
+.gallery.empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+.gallery-empty {
+  padding: 0 6px;
+}
+.thumb {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  overflow: hidden;
+  line-height: 0;
+}
+.thumb img {
+  height: 64px;
+  width: auto;
+  display: block;
+}
+.thumb:hover {
+  border-color: var(--muted);
+}
+.thumb.active {
+  border-color: var(--accent);
+}
+.thumb-tag {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
 .panel {
   display: flex;
   flex-direction: column;
