@@ -69,7 +69,9 @@ gated on model quality, not code — the detector must first beat GroundingDINO'
    `zerort.tfm`: flat little-endian versioned container, spec = the module docstring;
    `tensor-factory pack` converts (comes out ~3% smaller than the ONNX); `Runtime`
    loads either format by magic sniff. Round-trip bar is exact output equality on the
-   bundled models. The MCU distillation target (`TODO.md` model 2) consumes this.
+   bundled models. *(2026-07-02: the target platform is now an ARM SBC and the MCU tier
+   is deferred — `.tfm`'s remaining value is the protobuf-free loader for zerort, not an
+   MCU story.)*
 6. **GroundingDINO exit** (tracked in `TODO.md`): once v4+ beats the auto-labeler on the
    human-approved set, the model labels its own data and the heaviest dependency in the
    repo leaves the loop.
