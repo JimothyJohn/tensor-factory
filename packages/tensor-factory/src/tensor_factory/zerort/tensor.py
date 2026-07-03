@@ -11,6 +11,7 @@ path that is only used on small shape-computation tensors.
 from __future__ import annotations
 
 import math
+import operator
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -112,18 +113,57 @@ def expand_data(t: Tensor, out_shape: tuple[int, ...]) -> list:
     return out
 
 
-def binary_op(a: Tensor, b: Tensor, fn: Callable, dtype: int | None = None) -> Tensor:
-    """Elementwise ``fn`` over two broadcast tensors."""
+_PAIRWISE: dict[str, Callable] = {
+    "add": operator.add,
+    "sub": operator.sub,
+    "mul": operator.mul,
+    "div": operator.truediv,
+}
+
+
+def _scalar_rhs(data: list, v, op: str) -> list:
+    """``data <op> v`` with the operator inlined -- no per-element Python call."""
+    if op == "add":
+        return [x + v for x in data]
+    if op == "sub":
+        return [x - v for x in data]
+    if op == "mul":
+        return [x * v for x in data]
+    return [x / v for x in data]
+
+
+def _scalar_lhs(v, data: list, op: str) -> list:
+    if op == "add":
+        return [v + x for x in data]
+    if op == "sub":
+        return [v - x for x in data]
+    if op == "mul":
+        return [v * x for x in data]
+    return [v / x for x in data]
+
+
+def binary_op(a: Tensor, b: Tensor, op: str | Callable, dtype: int | None = None) -> Tensor:
+    """Elementwise op over two broadcast tensors.
+
+    ``op`` is one of the arithmetic names ("add"/"sub"/"mul"/"div"), dispatched to
+    C-speed ``map`` / inlined-operator list comprehensions, or an arbitrary callable
+    for the rare generic cases (integer division).
+    """
     out_dtype = dtype if dtype is not None else (a.dtype if not a.is_int else b.dtype)
+    fn = _PAIRWISE[op] if isinstance(op, str) else op
     if a.shape == b.shape:
         return Tensor(a.shape, out_dtype, list(map(fn, a.data, b.data)))
     out_shape = broadcast_shapes(a.shape, b.shape)
     if len(b.data) == 1:
         bv = b.data[0]
-        return Tensor(out_shape, out_dtype, [fn(x, bv) for x in expand_data(a, out_shape)])
+        da = expand_data(a, out_shape)
+        data = _scalar_rhs(da, bv, op) if isinstance(op, str) else [fn(x, bv) for x in da]
+        return Tensor(out_shape, out_dtype, data)
     if len(a.data) == 1:
         av = a.data[0]
-        return Tensor(out_shape, out_dtype, [fn(av, x) for x in expand_data(b, out_shape)])
+        db = expand_data(b, out_shape)
+        data = _scalar_lhs(av, db, op) if isinstance(op, str) else [fn(av, x) for x in db]
+        return Tensor(out_shape, out_dtype, data)
     da = expand_data(a, out_shape)
     db = expand_data(b, out_shape)
     return Tensor(out_shape, out_dtype, list(map(fn, da, db)))

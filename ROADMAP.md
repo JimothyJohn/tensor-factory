@@ -50,10 +50,14 @@ wire-quantization step of the detection contract.
 3. **Continuous portability proof.** A CI leg that runs the pipeline in a bare
    `python:3.12-slim` container with **no wheels installed** — the import-blocker unit
    test, but with the honesty of a real empty environment.
-4. **zerort speed pass (bounded).** Hoist per-run weight preparation (zero-point folds,
-   bigint-packable forms) into `Runtime.__init__`; reuse plane buffers. Target ~2×
-   (0.7 → ~1.5 fps). Pure Python will not approach onnxruntime and should not try —
-   the floor's job is to exist everywhere, not to race.
+4. **zerort speed pass (bounded) — DONE (2026-07).** Weight prep hoisted into
+   `Runtime.__init__`, planes kept as `bytes` rows (C-speed slice/join packing),
+   elementwise ops dispatched to C functions instead of per-element lambdas, lazy
+   clipping in DynamicQuantizeLinear. Measured: 1.44 s → 1.15 s/frame (~1.25×).
+   The remainder is the floor: ~0.6 s is CPython's C bigint machinery itself, and
+   ~0.2 s is spec-exact half-to-even `round()` that parity with onnxruntime requires.
+   Pure Python will not approach onnxruntime and should not try — the floor's job is
+   to exist everywhere, not to race.
 5. **Own the model container (`.tfm`).** ONNX-protobuf stays the interchange format, but
    the MCU distillation target (`TODO.md` model 2, item 6) wants a flat, versioned,
    ~200-line-spec container: header + tensor table + raw little-endian data. Generated

@@ -28,6 +28,22 @@ class Runtime:
         missing = {node.op_type for node in graph.nodes if node.op_type not in ops.OPS}
         if missing:
             raise ops.UnsupportedOp(f"model uses unimplemented ops: {sorted(missing)}")
+        # Hoist input-independent ConvInteger weight prep (zero-point folds, lane
+        # sizing) out of the per-frame path -- weights are initializers in any
+        # trained export, so this runs once per model, not once per inference.
+        for node in graph.nodes:
+            if node.op_type != "ConvInteger" or len(node.inputs) < 2:
+                continue
+            w = self._initializers.get(node.inputs[1])
+            if w is None:
+                continue
+            wzp = 0
+            if len(node.inputs) > 3 and node.inputs[3]:
+                wzp_t = self._initializers.get(node.inputs[3])
+                if wzp_t is None:
+                    continue  # dynamic zero point: prep at run time instead
+                wzp = int(wzp_t.item())
+            node.attrs["_prep"] = ops.prepare_conv_integer(w, wzp)
 
     def run(self, feeds: dict[str, Tensor]) -> dict[str, Tensor]:
         """Run the graph on ``feeds`` (name -> :class:`Tensor`); return all outputs."""

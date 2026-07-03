@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 import struct
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 from .pb import FLOAT32, INT32, INT64, UINT8, TensorDef
 from .tensor import Tensor, binary_op, expand_data, numel, result_dtype
@@ -176,10 +177,10 @@ def _cast(inputs: list[Tensor | None], attrs: dict[str, object]) -> list[Tensor]
     data = _req(inputs, 0)
     to = _int_attr(attrs, "to", 0)
     if to == FLOAT32:
-        return [Tensor(data.shape, FLOAT32, [float(v) for v in data.data])]
+        return [Tensor(data.shape, FLOAT32, list(map(float, data.data)))]
     if to in (INT32, INT64):
-        # ONNX Cast float->int truncates toward zero.
-        return [Tensor(data.shape, to, [int(v) for v in data.data])]
+        # ONNX Cast float->int truncates toward zero (int() on floats).
+        return [Tensor(data.shape, to, list(map(int, data.data)))]
     raise UnsupportedOp(f"Cast to dtype {to}")
 
 
@@ -194,19 +195,19 @@ def _int_div(a: int, b: int) -> int:
 @_register("Add")
 def _add(inputs: list[Tensor | None], attrs: dict[str, object]) -> list[Tensor]:
     a, b = _req(inputs, 0), _req(inputs, 1)
-    return [binary_op(a, b, lambda x, y: x + y, result_dtype(a, b))]
+    return [binary_op(a, b, "add", result_dtype(a, b))]
 
 
 @_register("Sub")
 def _sub(inputs: list[Tensor | None], attrs: dict[str, object]) -> list[Tensor]:
     a, b = _req(inputs, 0), _req(inputs, 1)
-    return [binary_op(a, b, lambda x, y: x - y, result_dtype(a, b))]
+    return [binary_op(a, b, "sub", result_dtype(a, b))]
 
 
 @_register("Mul")
 def _mul(inputs: list[Tensor | None], attrs: dict[str, object]) -> list[Tensor]:
     a, b = _req(inputs, 0), _req(inputs, 1)
-    return [binary_op(a, b, lambda x, y: x * y, result_dtype(a, b))]
+    return [binary_op(a, b, "mul", result_dtype(a, b))]
 
 
 @_register("Div")
@@ -214,7 +215,7 @@ def _div(inputs: list[Tensor | None], attrs: dict[str, object]) -> list[Tensor]:
     a, b = _req(inputs, 0), _req(inputs, 1)
     if a.is_int and b.is_int:
         return [binary_op(a, b, _int_div, result_dtype(a, b))]
-    return [binary_op(a, b, lambda x, y: x / y, result_dtype(a, b))]
+    return [binary_op(a, b, "div", result_dtype(a, b))]
 
 
 @_register("Relu")
@@ -346,10 +347,11 @@ def _dynamic_quantize(inputs: list[Tensor | None], attrs: dict[str, object]) -> 
         scale = 1.0
     zp = round(-lo / scale)  # round() is half-to-even, matching the spec
     zp = 0 if zp < 0 else 255 if zp > 255 else zp
-    q = []
-    for v in t.data:
-        y = round(v / scale) + zp
-        q.append(0 if y < 0 else 255 if y > 255 else y)
+    # scale/zp are derived from the actual min/max, so values land in [0, 255] except
+    # for the odd rounding overshoot at the extremes -- clip lazily, only if needed.
+    q = [round(v / scale) + zp for v in t.data]
+    if q and (min(q) < 0 or max(q) > 255):
+        q = [0 if v < 0 else 255 if v > 255 else v for v in q]
     return [
         Tensor(t.shape, UINT8, q),
         Tensor.scalar(scale, FLOAT32),
@@ -357,13 +359,38 @@ def _dynamic_quantize(inputs: list[Tensor | None], attrs: dict[str, object]) -> 
     ]
 
 
-def _lane_format(max_lane: int, n: int) -> tuple[int, str]:
-    """Bytes-per-lane and struct format wide enough that lane sums cannot overflow."""
+@dataclass
+class ConvPrep:
+    """Input-independent ConvInteger work, hoisted to model-load time.
+
+    ``wq`` is the flat weight tensor with the weight zero point folded out; ``sum_w``
+    the per-filter tap sums (the x-zero-point correction term); ``lane`` the
+    accumulator lane width in bytes, sized from the worst-case one-sided weight mass
+    so bigint lanes cannot overflow.
+    """
+
+    wq: list[int]
+    sum_w: list[int]
+    lane: int
+
+
+def prepare_conv_integer(w: Tensor, wzp: int) -> ConvPrep:
+    m = w.shape[0]
+    taps = len(w.data) // m if m else 0
+    wq = [int(v) - wzp for v in w.data]
+    sum_w = [sum(wq[f * taps : (f + 1) * taps]) for f in range(m)]
+    mass = 0
+    for f in range(m):
+        fw = wq[f * taps : (f + 1) * taps]
+        mass = max(mass, sum(v for v in fw if v > 0), -sum(v for v in fw if v < 0))
+    max_lane = 255 * mass
     if max_lane < 1 << 32:
-        return 4, f"<{n}I"
-    if max_lane < 1 << 64:
-        return 8, f"<{n}Q"
-    raise UnsupportedOp("integer conv accumulation exceeds 64-bit lanes")
+        lane = 4
+    elif max_lane < 1 << 64:
+        lane = 8
+    else:
+        raise UnsupportedOp("integer conv accumulation exceeds 64-bit lanes")
+    return ConvPrep(wq, sum_w, lane)
 
 
 @_register("ConvInteger")
@@ -390,51 +417,41 @@ def _conv_integer(inputs: list[Tensor | None], attrs: dict[str, object]) -> list
     wo = (wd + pl + pr - kw) // sw + 1
     nl = ho * wo
 
-    # Weights with the weight zero point folded out; per-filter tap sums for the
-    # x-zero-point correction (valid everywhere because padding uses xzp).
-    wq = [int(v) - wzp for v in w.data]
+    # Input-independent weight prep is hoisted to Runtime init when the weights are
+    # initializers (the usual case); recompute only for dynamic weights.
+    prep = attrs.get("_prep")
+    if not isinstance(prep, ConvPrep):
+        prep = prepare_conv_integer(w, wzp)
+    wq, sum_w, lane = prep.wq, prep.sum_w, prep.lane
     taps = cin * kh * kw
-    sum_w = [sum(wq[f * taps : (f + 1) * taps]) for f in range(m)]
-    max_mass = 255 * max(
-        (max(sum(v for v in wq[f * taps : (f + 1) * taps] if v > 0), 0) for f in range(m)),
-        default=0,
-    )
-    max_mass = max(
-        max_mass,
-        255
-        * max(
-            (max(-sum(v for v in wq[f * taps : (f + 1) * taps] if v < 0), 0) for f in range(m)),
-            default=0,
-        ),
-    )
-    lane, fmt = _lane_format(max_mass, nl)
+    fmt = f"<{nl}I" if lane == 4 else f"<{nl}Q"
     nbytes = nl * lane
 
     # Pad each input plane with the x zero point (ONNX ConvInteger padding semantics).
+    # Planes are kept as per-row ``bytes`` so the shifted/strided views below are
+    # C-speed slices and joins, not Python-level element loops.
     wp = wd + pl + pr
-    pad_row = [xzp] * wp
-    planes: list[list[list[int]]] = []
+    xzp_b = bytes([xzp])
+    pad_row = xzp_b * wp
+    lpad, rpad = xzp_b * pl, xzp_b * pr
+    planes: list[list[bytes]] = []
     for c in range(cin):
         off = c * h * wd
         rows = [pad_row] * pt
-        rows += [
-            [xzp] * pl + x.data[off + r * wd : off + (r + 1) * wd] + [xzp] * pr for r in range(h)
-        ]
+        rows += [lpad + bytes(x.data[off + r * wd : off + (r + 1) * wd]) + rpad for r in range(h)]
         rows += [pad_row] * pb
         planes.append(rows)
 
     acc_pos = [0] * m
     acc_neg = [0] * m
     span = (wo - 1) * sw + 1
+    buf = bytearray(nbytes)  # uint8 plane values spread onto `lane`-byte lanes
     for c in range(cin):
         rows = planes[c]
         for ky in range(kh):
             for kx in range(kw):
-                vals: list[int] = []
-                for oy in range(ho):
-                    row = rows[oy * sh + ky]
-                    vals.extend(row[kx : kx + span : sw])
-                plane_int = int.from_bytes(struct.pack(fmt, *vals), "little")
+                buf[::lane] = b"".join(rows[oy * sh + ky][kx : kx + span : sw] for oy in range(ho))
+                plane_int = int.from_bytes(buf, "little")
                 base = (c * kh + ky) * kw + kx
                 for f in range(m):
                     wv = wq[f * taps + base]
