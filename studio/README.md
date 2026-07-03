@@ -1,14 +1,27 @@
 # Tensor Factory Studio
 
-An active-learning labeling tool for tensor-factory detectors. The **browser** handles
-video ingest, the bounding-box canvas, and the video-game-style WASD labeling; a **local
-Python backend** ([`tensor-factory-studio`](../packages/tensor-factory-studio)) owns the
-on-disk dataset and trains the tiny detector continuously on this machine's GPU (MPS/CUDA)
-as you label. See [`PROMPT.md`](PROMPT.md) for the vision and the decision history.
+An active-learning labeling tool for tensor-factory detectors, built on one premise:
+**the human judges, the machine labors.** You don't grind through frames — you
+orchestrate: nudge a box when the model's guess is off, veto a bad sample, and let the
+loop do the rest. The **browser** handles video ingest, the bounding-box canvas, and the
+video-game-style WASD labeling; a **local Python backend**
+([`tensor-factory-studio`](../packages/tensor-factory-studio)) owns the on-disk dataset
+and trains the tiny detector continuously on this machine's GPU (MPS/CUDA) as you label.
+See [`PROMPT.md`](PROMPT.md) for the vision and the decision history.
 
-Label a frame → it's pushed to the backend → the detector retrains on everything labeled so
-far → the next unlabeled frame comes back **pre-filled with the model's prediction**. Most
-frames you just confirm. The dataset and the detector improve together, live.
+The loop is reactive: label a frame → the detector retrains on everything labeled so far
+→ the next frame comes back **pre-filled with the model's prediction**. Your effort
+shrinks as the model grows:
+
+- **Near-duplicates never reach you** — a dHash gate at ingest skips frames too similar
+  to ones already labeled, so every frame on screen is worth your attention.
+- **Mostly you confirm.** Glance → `Space` → next. When the pre-fill is off, drag the
+  correction and `W` — that nudge is precisely the sample the model was missing.
+- **Bad data gets caught, not collected.** Machine guesses never enter the dataset
+  unconfirmed (auto-label is opt-in; you commit every box), and the keep-best guardrail
+  flags regressed rounds with the likely-bad sample ids, clickable to jump there.
+
+The dataset and the detector improve together, live.
 
 ## What works
 
