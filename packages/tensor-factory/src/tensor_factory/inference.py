@@ -18,8 +18,8 @@ Two interchangeable engines sit behind :class:`Detector`:
 
 ``engine="auto"`` (the default) uses onnxruntime when the extra is installed and falls
 back to zerort otherwise, so ``detect`` works on a bare Python install. Images may be
-passed as PIL images (PIL path) or as a path / raw bytes of a PNG or binary PPM
-(decoded by the stdlib decoder, no PIL needed).
+passed as PIL images (PIL path) or as a path / raw bytes of a PNG, baseline JPEG, or
+binary PPM (decoded by the stdlib decoder, no PIL needed).
 """
 
 from __future__ import annotations
@@ -113,8 +113,8 @@ class Detector:
     def preprocess(self, image: Image.Image | str | Path | bytes):
         """Image -> the model input: a numpy array (ort) or zerort ``Tensor``.
 
-        Accepts a PIL image, or a path / raw bytes of a PNG or binary PPM which are
-        decoded by the stdlib decoder -- the latter works without PIL installed.
+        Accepts a PIL image, or a path / raw bytes of a PNG, baseline JPEG, or binary
+        PPM, decoded by the stdlib decoder -- the latter works without PIL installed.
         """
         shape = (1, 3, self.input_size, self.input_size)
         if isinstance(image, str | Path | bytes):

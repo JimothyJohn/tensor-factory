@@ -1,10 +1,9 @@
 """Stdlib-only image decoding and resizing for the zero-dependency path.
 
-Decodes PNG (8-bit gray / RGB / palette / +alpha, non-interlaced -- what cameras and
-screenshots actually produce) via ``zlib``, and binary PPM (P6). Resizing is a separable
+Decodes PNG (8-bit gray / RGB / palette / +alpha, non-interlaced) via ``zlib``,
+baseline JPEG (see :mod:`.jpeg`), and binary PPM (P6). Resizing is a separable
 triangle-filter resample (the same family as PIL's ``BILINEAR``), so downscales average
-over the source footprint instead of skipping pixels. JPEG is deliberately out of scope
-for now (see ROADMAP.md); with PIL installed the fast path handles it.
+over the source footprint instead of skipping pixels.
 
 Defensive by construction: chunk CRCs are checked, the inflate size is bounded by the
 header-declared dimensions (a truncated or bloated IDAT stream raises instead of
@@ -190,12 +189,16 @@ def decode_ppm(data: bytes) -> tuple[int, int, bytes]:
 
 
 def decode(data: bytes) -> tuple[int, int, bytes]:
-    """Sniff and decode PNG or PPM bytes to ``(width, height, packed RGB)``."""
+    """Sniff and decode PNG, baseline JPEG, or PPM bytes to ``(width, height, packed RGB)``."""
     if data[:8] == _PNG_MAGIC:
         return decode_png(data)
+    if data[:2] == b"\xff\xd8":
+        from .jpeg import decode_jpeg  # deferred: jpeg imports ImageError from here
+
+        return decode_jpeg(data)
     if data[:2] == b"P6":
         return decode_ppm(data)
-    raise ImageError("unrecognized image format (PNG and binary PPM are supported)")
+    raise ImageError("unrecognized image format (PNG, baseline JPEG and binary PPM)")
 
 
 def _filter_weights(src: int, dst: int) -> list[tuple[int, list[float]]]:
@@ -248,7 +251,10 @@ def resize_rgb(rgb: bytes, width: int, height: int, out_w: int, out_h: int) -> l
 
 
 def preprocess(source: bytes | str | Path, size: int) -> Tensor:
-    """Decode + resize + normalize an image to the model's ``(1, 3, S, S)`` input tensor."""
+    """Decode + resize + normalize an image to the model's ``(1, 3, S, S)`` input tensor.
+
+    Accepts PNG, baseline JPEG, or binary PPM bytes (or a path to one).
+    """
     data = source if isinstance(source, bytes) else Path(source).read_bytes()
     width, height, rgb = decode(data)
     hwc = resize_rgb(rgb, width, height, size, size)

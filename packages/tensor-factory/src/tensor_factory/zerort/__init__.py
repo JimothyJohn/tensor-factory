@@ -15,6 +15,7 @@ bigint multiply-add. See :mod:`tensor_factory.zerort.ops`.
 
 from .engine import Runtime
 from .imageio import ImageError, decode, decode_png, decode_ppm, preprocess, resize_rgb
+from .jpeg import decode_jpeg
 from .ops import UnsupportedOp
 from .pb import WireError, parse_model
 from .tensor import Tensor
@@ -28,6 +29,7 @@ __all__ = [
     "UnsupportedOp",
     "WireError",
     "decode",
+    "decode_jpeg",
     "decode_png",
     "decode_ppm",
     "parse_model",
