@@ -9,19 +9,22 @@ this file tracks *platform ownership*.
 
 ## Where the floor stands today
 
-`tensor_factory.zerort` (landed 2026-07) runs the full pipeline — PNG/PPM bytes →
-protobuf model parse → int8 graph execution → box + presence — **on the stdlib alone**,
-parity-tested against onnxruntime (`tests/test_zerort_parity.py` proves it in a
-subprocess that *blocks* numpy/PIL/onnxruntime/onnx imports).
+`tensor_factory.zerort` (landed 2026-07) runs the full pipeline — PNG/JPEG/PPM bytes →
+model parse (ONNX protobuf or the flat `.tfm` container) → int8 graph execution → box +
+presence — **on the stdlib alone**, and the stdlib HTTP endpoint serves it. Proof lives
+at three levels: parity tests against onnxruntime, import-blocked subprocess tests
+(`tests/test_zerort_parity.py`, the HTTP equivalent in `tensor-factory-mcp`), and a CI
+job running `scripts/portability_check.py` in a bare `python:3.12-slim` container with
+no wheels installed.
 
 | Engine | Deps | 480 px throughput (Mac Studio, CPU) | Role |
 |---|---|---|---|
 | onnxruntime (`infer` extra) | onnxruntime, numpy, PIL | ~215 fps | fast path |
-| zerort | **none** | ~0.7 fps | floor, oracle, last resort |
+| zerort | **none** | ~0.9 fps | floor, oracle, last resort |
 
 The trick that makes pure Python viable: **bigint SIMD** — image planes packed into
 single arbitrary-precision integers so each ConvInteger tap is one C-speed bigint
-multiply-add (~205M MACs/frame in ~1.4 s). Parity: ≤2e-3 normalized worst observed
+multiply-add (~205M MACs/frame in ~1.15 s). Parity: ≤2e-3 normalized worst observed
 (one quantization lane at an f32/f64 rounding boundary), 5e-3 gate — under the 1/255
 wire-quantization step of the detection contract.
 
@@ -31,7 +34,7 @@ wire-quantization step of the detection contract.
 |---|---|---|
 | onnxruntime + numpy + PIL | inference (`infer` extra) | **optional** — zerort is the fallback (was: required) |
 | protobuf/onnx (model loading) | inference | **eliminated** — `zerort.pb` reads the wire format |
-| PIL (image decode) | inference | **optional** — stdlib PNG/PPM decoder (JPEG still needs PIL) |
+| PIL (image decode) | inference | **optional** — stdlib PNG, baseline JPEG, and PPM decoders (progressive JPEG still needs PIL) |
 | torch | training | required, **stays** — see non-goals |
 | GroundingDINO | auto-labeling | scheduled exit: model-in-the-loop labeling (`TODO.md` "Now") |
 | Gemini API | image generation | inherently hosted — mitigate with dataset durability, not reimplementation |
@@ -39,17 +42,21 @@ wire-quantization step of the detection contract.
 
 ## Next, in order
 
-1. **Baseline JPEG decoder (stdlib).** Cameras emit JPEG; the zero-dep story currently
-   stops at PNG/PPM. Baseline sequential DCT (no progressive) is ~400 lines and closes
-   the gap for real capture pipelines. Adversarial tests like the PNG decoder's
-   (truncation, hostile headers, fuzz).
-2. **Zero-dep HTTP serving.** The HTTP endpoint (`tensor_factory_mcp.http_server`) is
-   already stdlib `http.server`, but `core.py` PIL-opens the posted bytes — route
-   PNG/PPM bytes through the stdlib decoder instead so a bare CPython can *serve*
-   detections. Add the import-blocked test to pin it, and a `--engine` flag.
-3. **Continuous portability proof.** A CI leg that runs the pipeline in a bare
-   `python:3.12-slim` container with **no wheels installed** — the import-blocker unit
-   test, but with the honesty of a real empty environment.
+Items 1–5 below landed 2026-07 (kept with their outcomes for the record); item 6 is
+gated on model quality, not code — the detector must first beat GroundingDINO's boxes.
+
+1. **Baseline JPEG decoder (stdlib) — DONE (2026-07).** `zerort.jpeg`: baseline
+   sequential Huffman, gray + YCbCr, 4:4:4/4:2:2/4:2:0, restart markers; two-level
+   Huffman LUT gets 480 px decodes to ~0.4 s. Pinned against libjpeg (mean <1.5 code
+   values on photographic content); progressive/arithmetic/CMYK rejected clearly;
+   truncation/hostile-header/fuzz tests like the PNG decoder's.
+2. **Zero-dep HTTP serving — DONE (2026-07).** `core.detect/detect_bytes` fall back
+   to the stdlib decoder when PIL is absent; every result is one forward pass
+   (`Detector.detect_outputs`); `tensor-factory-http --engine`; pinned by an
+   import-blocked subprocess test doing a real socket round-trip.
+3. **Continuous portability proof — DONE (2026-07).** The CI `portability` job runs
+   `scripts/portability_check.py` in `python:3.12-slim` with no wheels: PNG detect,
+   `.tfm` pack + output-identical re-detect, PPM bytes, HTTP round-trip.
 4. **zerort speed pass (bounded) — DONE (2026-07).** Weight prep hoisted into
    `Runtime.__init__`, planes kept as `bytes` rows (C-speed slice/join packing),
    elementwise ops dispatched to C functions instead of per-element lambdas, lazy
@@ -58,11 +65,11 @@ wire-quantization step of the detection contract.
    ~0.2 s is spec-exact half-to-even `round()` that parity with onnxruntime requires.
    Pure Python will not approach onnxruntime and should not try — the floor's job is
    to exist everywhere, not to race.
-5. **Own the model container (`.tfm`).** ONNX-protobuf stays the interchange format, but
-   the MCU distillation target (`TODO.md` model 2, item 6) wants a flat, versioned,
-   ~200-line-spec container: header + tensor table + raw little-endian data. Generated
-   from the ONNX export; parseable in any language in an afternoon. Do this *when the
-   MCU work starts*, not before.
+5. **Own the model container (`.tfm`) — DONE (2026-07, pulled forward).**
+   `zerort.tfm`: flat little-endian versioned container, spec = the module docstring;
+   `tensor-factory pack` converts (comes out ~3% smaller than the ONNX); `Runtime`
+   loads either format by magic sniff. Round-trip bar is exact output equality on the
+   bundled models. The MCU distillation target (`TODO.md` model 2) consumes this.
 6. **GroundingDINO exit** (tracked in `TODO.md`): once v4+ beats the auto-labeler on the
    human-approved set, the model labels its own data and the heaviest dependency in the
    repo leaves the loop.

@@ -27,13 +27,16 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   `helicoil-mock-v1.onnx` is still bundled alongside it (box-only, selectable via
   `model_path`); earlier synthetic/photoreal models (v1–v5) live gitignored under
   `examples/helicoils/images/`.
-- **Zero-dependency inference floor (`tensor_factory.zerort`).** A pure-stdlib ONNX
-  runtime — protobuf wire-format reader, the int8 op set (bigint-SIMD ConvInteger),
-  PNG/PPM decoding, triangle-filter resize — so image → detection runs on bare CPython
-  with **no third-party packages**. `Detector(engine="auto")` uses onnxruntime when the
-  `infer` extra is installed (~215 fps) and falls back to zerort otherwise (~0.7 fps);
-  parity vs onnxruntime is pinned by tests (op-level exact for integer kernels; full-model
-  ≤5e-3, incl. an import-blocked subprocess proof). De-dependency plan: [`ROADMAP.md`](ROADMAP.md).
+- **Zero-dependency inference floor (`tensor_factory.zerort`).** A pure-stdlib runtime —
+  protobuf wire-format reader (plus the flat `.tfm` container, `tensor-factory pack`),
+  the int8 op set (bigint-SIMD ConvInteger), PNG/baseline-JPEG/PPM decoding, triangle
+  resize — so image → detection (and HTTP serving via `tensor-factory-http`) runs on
+  bare CPython with **no third-party packages**. `Detector(engine="auto")` uses
+  onnxruntime when the `infer` extra is installed (~215 fps) and falls back to zerort
+  otherwise (~0.9 fps); parity vs onnxruntime is pinned by tests (op-level exact for
+  integer kernels; full-model ≤5e-3; import-blocked subprocess proofs) and CI runs the
+  whole stack in a bare `python:3.12-slim` container
+  (`scripts/portability_check.py`). Plan + status: [`ROADMAP.md`](ROADMAP.md).
 - **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
