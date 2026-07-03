@@ -10,9 +10,6 @@
   // Light gallery wall is the default; honor a stored dark preference before first paint.
   try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -48,13 +45,13 @@
       <div class="quarter"></div>
       <div class="square"></div>
     </div>
-    <p class="kicker" data-rise style="--d:.05s">Tiny-CNN object detection · Apache-2.0</p>
-    <h1 data-rise style="--d:.12s">A prompt<br />becomes a tiny<br /><em>detector</em>.</h1>
-    <p class="lede" data-rise style="--d:.24s">
+    <p class="kicker">Tiny-CNN object detection · Apache-2.0</p>
+    <h1>A prompt becomes a tiny <em>detector</em>.</h1>
+    <p class="lede">
       tensor-factory turns a text prompt into a synthetic dataset, an int8 ONNX model,
       and a CPU inference harness. No GPU at runtime. No AGPL anywhere.
     </p>
-    <div class="actions" data-rise style="--d:.34s">
+    <div class="actions">
       <a class="link-arrow primary" href="demo.html">Live demo <span class="a">→</span></a>
       <a class="link-arrow" href="https://github.com/JimothyJohn/tensor-factory">GitHub <span class="a">↗</span></a>
     </div>
