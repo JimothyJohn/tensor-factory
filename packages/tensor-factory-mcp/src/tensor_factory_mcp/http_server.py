@@ -34,7 +34,7 @@ DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 
 
 def _make_handler(
-    model_path: str | None, input_size: int, max_bytes: int
+    model_path: str | None, input_size: int, max_bytes: int, engine: str
 ) -> type[BaseHTTPRequestHandler]:
     class DetectHandler(BaseHTTPRequestHandler):
         # Advertised in the Server: header; keep the version out of it (don't leak internals).
@@ -60,7 +60,7 @@ def _make_handler(
                 self._send_json(200, {"status": "ok"})
             elif self.path == "/model_info":
                 try:
-                    self._send_json(200, core.model_info(model_path, input_size))
+                    self._send_json(200, core.model_info(model_path, input_size, engine))
                 except Exception as exc:  # noqa: BLE001 -- surfaced as JSON, not a 500 trace
                     self._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
             else:
@@ -86,7 +86,7 @@ def _make_handler(
                 return
             data = self.rfile.read(length)
             try:
-                result = core.detect_bytes(data, model_path, input_size)
+                result = core.detect_bytes(data, model_path, input_size, engine)
             except Exception as exc:  # noqa: BLE001 -- bad image -> 400, not a 500 trace
                 self._send_json(400, {"error": f"could not decode image: {type(exc).__name__}"})
                 return
@@ -102,9 +102,10 @@ def make_server(
     model_path: str | None = None,
     input_size: int = core.DEFAULT_INPUT_SIZE,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    engine: str = "auto",
 ) -> ThreadingHTTPServer:
     """Build (but don't start) the detection HTTP server. ``port=0`` binds an ephemeral port."""
-    handler = _make_handler(model_path, input_size, max_bytes)
+    handler = _make_handler(model_path, input_size, max_bytes, engine)
     return ThreadingHTTPServer((host, port), handler)
 
 
@@ -115,9 +116,15 @@ def serve(
     model_path: str | None = None,
     input_size: int = core.DEFAULT_INPUT_SIZE,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    engine: str = "auto",
 ) -> int:
     httpd = make_server(
-        host, port, model_path=model_path, input_size=input_size, max_bytes=max_bytes
+        host,
+        port,
+        model_path=model_path,
+        input_size=input_size,
+        max_bytes=max_bytes,
+        engine=engine,
     )
     model = core.resolve_model(model_path)
     bound = httpd.server_address[1]
@@ -143,6 +150,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--input-size", type=int, default=core.DEFAULT_INPUT_SIZE, help="square model input px"
     )
     parser.add_argument(
+        "--engine",
+        choices=("auto", "ort", "zerort"),
+        default="auto",
+        help="inference engine: onnxruntime, the pure-stdlib zerort, or auto-fallback",
+    )
+    parser.add_argument(
         "--max-mb",
         type=float,
         default=DEFAULT_MAX_BYTES / (1024 * 1024),
@@ -155,6 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_path=args.model,
         input_size=args.input_size,
         max_bytes=int(args.max_mb * 1024 * 1024),
+        engine=args.engine,
     )
 
 

@@ -154,6 +154,15 @@ class Detector:
     def _box_from(self, values: list[float]) -> BBox:
         return BBox.clamped(values[0], values[1], values[2], values[3])
 
+    def detect_outputs(self, image: Image.Image | str | Path | bytes) -> dict[str, list[float]]:
+        """One inference, all raw outputs (``box``, and ``presence``/``logits`` if present).
+
+        The serving layers use this to build presence + box + uint8 from a *single*
+        forward pass -- on the zerort engine each extra pass costs ~1.5 s, so the
+        per-method conveniences below are not free there.
+        """
+        return self._run(image)
+
     def detect_box(self, image: Image.Image | str | Path | bytes) -> BBox:
         outs = self._run(image)
         return self._box_from(outs.get("box", next(iter(outs.values()))))
