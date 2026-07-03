@@ -20,6 +20,7 @@ export class CanvasEditor {
     this.onChange = onChange;
     this.classes = []; // [{name, color}] — set via setClasses
 
+    this.dpr = 1; // device-pixel multiplier applied to the drawing buffer
     this.bitmap = null; // current frame (ImageBitmap | HTMLImageElement)
     this.boxes = []; // [{x1,y1,x2,y2,cls}] normalized
     this.selected = -1;
@@ -35,12 +36,16 @@ export class CanvasEditor {
   }
 
   /**
-   * Match the canvas drawing buffer to its displayed size so a resized preview stays
-   * crisp (and the crosshair/box math stays pixel-accurate). Called by a ResizeObserver.
+   * Match the canvas drawing buffer to its displayed size *at device resolution*, so a
+   * retina display gets a crisp frame instead of a 1x upscale (and the crosshair/box
+   * math stays pixel-accurate). Called by a ResizeObserver. The multiplier is capped at
+   * 2: beyond that the sharpness gain is invisible while the per-mousemove redraw cost
+   * keeps growing with buffer area.
    */
   fitToDisplay() {
-    const w = Math.round(this.canvas.clientWidth) || this.canvas.width;
-    const h = Math.round(this.canvas.clientHeight) || this.canvas.height;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(this.canvas.clientWidth * this.dpr) || this.canvas.width;
+    const h = Math.round(this.canvas.clientHeight * this.dpr) || this.canvas.height;
     if (w && h && (this.canvas.width !== w || this.canvas.height !== h)) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -214,7 +219,7 @@ export class CanvasEditor {
       const y = oy + b.y1 * dh;
       const w = (b.x2 - b.x1) * dw;
       const h = (b.y2 - b.y1) * dh;
-      ctx.lineWidth = selected ? 3 : 2;
+      ctx.lineWidth = (selected ? 3 : 2) * this.dpr;
       ctx.strokeStyle = color;
       ctx.strokeRect(x, y, w, h);
       if (selected) {
@@ -238,13 +243,13 @@ export class CanvasEditor {
     if (c.x < ox || c.x > ox + dw || c.y < oy || c.y > oy + dh) return;
     const ctx = this.ctx;
     ctx.save();
-    ctx.lineWidth = 1;
+    ctx.lineWidth = this.dpr;
     // dark underlay then light line, so the guides read on both bright and dark frames
     ctx.strokeStyle = "rgba(0,0,0,0.35)";
     line(ctx, c.x + 0.5, oy, c.x + 0.5, oy + dh);
     line(ctx, ox, c.y + 0.5, ox + dw, c.y + 0.5);
     ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([4 * this.dpr, 4 * this.dpr]);
     line(ctx, c.x + 0.5, oy, c.x + 0.5, oy + dh);
     line(ctx, ox, c.y + 0.5, ox + dw, c.y + 0.5);
     ctx.restore();

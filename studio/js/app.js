@@ -529,6 +529,15 @@ function jumpToFrame(frameId) {
 function drawSparkline(history, best, baseline) {
   const cv = $("sparkline");
   const ctx = cv.getContext("2d");
+  // Size the buffer from the displayed size at device resolution (the CSS stretches
+  // the canvas to the panel width; without this the plot renders soft on retina).
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dw = Math.round(cv.clientWidth * dpr) || cv.width;
+  const dh = Math.round(cv.clientHeight * dpr) || cv.height;
+  if (cv.width !== dw || cv.height !== dh) {
+    cv.width = dw;
+    cv.height = dh;
+  }
   const W = cv.width;
   const H = cv.height;
   ctx.clearRect(0, 0, W, H);
@@ -536,19 +545,19 @@ function drawSparkline(history, best, baseline) {
   const vals = baseline != null ? [...history, baseline] : history;
   const max = Math.max(...vals) * 1.05;
   const min = 0;
-  const y = (v) => H - 4 - ((v - min) / (max - min || 1)) * (H - 8);
-  const x = (i) => 2 + (i / (history.length - 1)) * (W - 4);
+  const y = (v) => H - 4 * dpr - ((v - min) / (max - min || 1)) * (H - 8 * dpr);
+  const x = (i) => 2 * dpr + (i / (history.length - 1)) * (W - 4 * dpr);
   if (baseline != null) {
     ctx.strokeStyle = "#7b8a9e";
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
     ctx.beginPath();
-    ctx.moveTo(2, y(baseline));
-    ctx.lineTo(W - 2, y(baseline));
+    ctx.moveTo(2 * dpr, y(baseline));
+    ctx.lineTo(W - 2 * dpr, y(baseline));
     ctx.stroke();
     ctx.setLineDash([]);
   }
   ctx.strokeStyle = "#4ade80";
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
   history.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
   ctx.stroke();

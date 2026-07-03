@@ -119,6 +119,11 @@ main {
   padding: 18px;
   align-items: start;
 }
+/* grid children may not force the column wider than the viewport — a persisted
+   canvas size from a large window must clamp on a small one, not overflow */
+main > * {
+  min-width: 0;
+}
 
 .stage {
   display: flex;
@@ -137,6 +142,7 @@ main {
   resize: both;
   overflow: hidden;
   border-radius: 12px;
+  max-height: 82vh;
 }
 /* make the native resize grip easier to spot */
 .canvas-wrap::after {
@@ -165,7 +171,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 12px;
   cursor: crosshair;
-  background: #0b0e14;
+  background: var(--bg);
 }
 
 .empty-hint {
@@ -203,8 +209,8 @@ main {
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  max-width: 760px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   font-variant-numeric: tabular-nums;
 }
 .counts {
@@ -395,7 +401,7 @@ main {
   height: 64px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0b0e14;
+  background: var(--bg);
 }
 .metrics {
   display: grid;
@@ -465,6 +471,25 @@ main {
 @media (max-width: 860px) {
   main {
     grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  header,
+  main {
+    padding: 10px;
+  }
+  main {
+    gap: 12px;
+  }
+  .toolbar {
+    gap: 8px;
+  }
+  .dino-prompt {
+    flex: 1 1 120px;
+    width: auto;
+  }
+  .thumb img {
+    height: 48px;
   }
 }
 
@@ -540,5 +565,14 @@ main {
   from {
     opacity: 0;
     transform: translateX(12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+  .toast.leaving {
+    transition: none;
   }
 }
