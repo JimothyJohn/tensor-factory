@@ -127,7 +127,8 @@ section { border-top: 1px solid var(--hair); }
   border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
 .spec > div { background: var(--paper); padding: 1.1rem 1.1rem 1rem; }
 .spec .n { font-weight: 750; font-size: clamp(1.5rem, 3.2vw, 2rem); line-height: 1; letter-spacing: -0.02em; }
-.spec .n sup { font-size: 0.5em; vertical-align: top; color: var(--red); }
+.spec .n sup { font-size: 0.5em; vertical-align: baseline; color: var(--red);
+  margin-left: 0.08em; }   /* units sit on the baseline, not superscript */
 .spec .n span { color: var(--red); }
 .spec .u { font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--muted); margin-top: 0.55rem; line-height: 1.4; }
