@@ -65,6 +65,13 @@ stage 1 MCU-portable.
 
 ## Recently done (this session)
 
+- [x] **zerort: zero-dependency inference floor.** Pure-stdlib ONNX runtime under
+  `tensor_factory.zerort` (protobuf reader, int8 op set with bigint-SIMD ConvInteger,
+  PNG/PPM decode, triangle resize); `Detector(engine="auto")` falls back to it when the
+  `infer` extra is absent. Parity-tested against onnxruntime (exact integer kernels,
+  <=5e-3 full-model, import-blocked subprocess proof). Platform-ownership plan:
+  [`ROADMAP.md`](ROADMAP.md).
+
 - [x] **In-browser demo (`docs/demo.html`).** Runs the bundled int8 models entirely
   client-side via onnxruntime-web (WASM, single-threaded so it works on plain static hosts):
   auto-detects a synthetic sample with the mock model on load, switch to the v4 presence
