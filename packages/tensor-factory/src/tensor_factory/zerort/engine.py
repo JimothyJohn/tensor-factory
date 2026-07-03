@@ -10,17 +10,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import ops
+from . import ops, tfm
 from .pb import parse_model
 from .tensor import Tensor
 
 
 class Runtime:
-    """Execute an ONNX graph with pure-Python kernels."""
+    """Execute an ONNX or .tfm graph with pure-Python kernels."""
 
     def __init__(self, model: str | Path | bytes) -> None:
         data = model if isinstance(model, bytes) else Path(model).read_bytes()
-        self.model = parse_model(data)
+        self.model = tfm.load(data) if data[:4] == tfm.MAGIC else parse_model(data)
         graph = self.model.graph
         self._initializers = {t.name: ops.tensor_from_def(t) for t in graph.initializers if t.name}
         self.input_names = [n for n in graph.input_names if n not in self._initializers]

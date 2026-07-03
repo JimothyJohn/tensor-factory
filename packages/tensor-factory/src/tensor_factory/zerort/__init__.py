@@ -18,11 +18,13 @@ from .imageio import ImageError, decode, decode_png, decode_ppm, preprocess, res
 from .ops import UnsupportedOp
 from .pb import WireError, parse_model
 from .tensor import Tensor
+from .tfm import TfmError
 
 __all__ = [
     "ImageError",
     "Runtime",
     "Tensor",
+    "TfmError",
     "UnsupportedOp",
     "WireError",
     "decode",

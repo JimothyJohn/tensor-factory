@@ -59,6 +59,21 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pack(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .zerort import parse_model
+    from .zerort.tfm import dump
+
+    src = Path(args.model)
+    out = Path(args.out) if args.out else src.with_suffix(".tfm")
+    data = src.read_bytes()
+    blob = dump(parse_model(data))
+    out.write_bytes(blob)
+    print(f"{src} ({len(data)} B) -> {out} ({len(blob)} B)")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tensor-factory")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -87,6 +102,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="inference engine: onnxruntime, the pure-stdlib zerort, or auto-fallback",
     )
     b.set_defaults(func=_cmd_bench)
+
+    k = sub.add_parser("pack", help="convert an ONNX model to the flat .tfm container")
+    k.add_argument("--model", required=True, help="path to the ONNX model")
+    k.add_argument("--out", default=None, help="output path (default: <model>.tfm)")
+    k.set_defaults(func=_cmd_pack)
     return parser
 
 

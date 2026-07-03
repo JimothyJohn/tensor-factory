@@ -50,6 +50,11 @@ class Detector:
     ) -> None:
         if engine not in ("auto", "ort", "zerort"):
             raise ValueError(f"engine must be 'auto', 'ort' or 'zerort', got {engine!r}")
+        if str(model_path).endswith(".tfm"):
+            # The flat .tfm container is zerort's native format; onnxruntime cannot load it.
+            if engine == "ort":
+                raise ValueError(".tfm models run on the zerort engine (pass engine='zerort')")
+            engine = "zerort"
         self.input_size = input_size
         self._np = None
         self._session = None
