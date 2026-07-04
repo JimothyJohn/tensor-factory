@@ -109,3 +109,27 @@ New libraries go under `packages/<name>/` with their own `pyproject.toml`; `[too
 - **Tests carry markers.** `@pytest.mark.unit` for fast/isolated, `@pytest.mark.integration` for anything touching real external resources (no mocked services — use the real thing or cached fixtures). Add markers to new tests so the gate can select them.
 - **`py.typed` is shipped** — the library is typed; keep `ty check` clean.
 - Bug fix → regression test first (it fails before the fix, stays forever after).
+
+## Parallel work — one task, one worktree
+
+Multiple agents/sessions run against this repo concurrently. The failure mode is **sharing
+one checkout**: two sessions in the same directory share one `git status`, one HEAD, one
+index, one `.venv`, and one dev-server port, so their commits land on each other's branch
+and their edits collide in one tree. A branch name is *not* isolation — `git checkout -b`
+only moves the single shared HEAD. Isolation comes from a separate **git worktree**.
+
+- **Before starting concurrent work, give the task its own worktree:** `scripts/worktree <branch> [base]`
+  creates `../tensor-factory-<slug>` on that branch, backed by the shared `.git`. The main
+  checkout stays the primary/interactive session; everything parallel gets its own dir.
+  (`scripts/worktree --list` / `--rm <branch>` to manage them. The `Agent` tool's
+  `isolation: "worktree"` does the same for spawned agents.)
+- **Each worktree is its own checkout** — run `uv sync --locked --all-packages` once inside
+  it before working; its `.venv` is separate.
+- **Never `git stash` to clear a tree that has someone else's uncommitted work.** Commit it
+  (a `wip:` message is fine) so it's durable, or leave it and use a different worktree.
+  Stashing hides it from `git status` and from the author.
+- **Never `git checkout`/`switch` to another branch with a dirty tree you didn't create** —
+  git silently drags those changes across, polluting both branches. Commit or worktree first.
+- **Before adding to an existing branch/PR, check who else was there:** `git log --since=2h <branch>`
+  and `gh pr view <n> --json comments,commits`. Add on top of another agent's commits; don't
+  rewrite over them.

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# worktree — create an isolated git worktree for a branch so parallel agents/sessions
+# never share one working directory.
+#
+# Two sessions in the SAME checkout are sequential pretending to be parallel: they share
+# one `git status`, one HEAD, one index, one .venv, one dev-server port. Their commits land
+# on each other's branch and their edits collide in one tree (the exact thrash this repo
+# keeps hitting). A separate worktree gives each task its own physical directory on its own
+# branch, all backed by the shared .git. The main checkout stays the primary/interactive
+# session; every concurrent task gets its own worktree.
+#
+# Usage:
+#   scripts/worktree <branch> [base]   # worktree at ../tensor-factory-<slug> on <branch>
+#   scripts/worktree --list            # show all worktrees
+#   scripts/worktree --rm <branch>     # remove that branch's worktree (the branch is kept)
+#
+# Examples:
+#   scripts/worktree feat/studio-multiclass-detection   # existing branch -> its own dir
+#   scripts/worktree feat/new-thing master              # new branch, based on master
+#
+# Each worktree is its own checkout with its own .venv: run
+# `uv sync --locked --all-packages` once inside it before working.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+parent="$(dirname "$root")"
+repo="$(basename "$root")"
+
+# branch -> directory slug: drop any owner prefix, lowercase, keep only safe chars.
+slug() { printf '%s' "$1" | sed 's#.*/##; s#[^A-Za-z0-9._-]#-#g' | tr '[:upper:]' '[:lower:]'; }
+
+usage() { sed -n '11,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+case "${1:-}" in
+  "" | -h | --help)
+    usage
+    exit 0
+    ;;
+  --list)
+    git worktree list
+    exit 0
+    ;;
+  --rm)
+    [[ $# -eq 2 ]] || {
+      echo "usage: scripts/worktree --rm <branch>" >&2
+      exit 2
+    }
+    dir="$parent/$repo-$(slug "$2")"
+    git worktree remove "$dir"
+    echo "removed worktree $dir (branch $2 kept)"
+    exit 0
+    ;;
+esac
+
+branch="$1"
+base="${2:-HEAD}"
+dir="$parent/$repo-$(slug "$branch")"
+
+if [[ -e "$dir" ]]; then
+  echo "path already exists: $dir" >&2
+  echo "(see existing worktrees with: scripts/worktree --list)" >&2
+  exit 1
+fi
+
+if git show-ref --verify --quiet "refs/heads/$branch"; then
+  git worktree add "$dir" "$branch" # existing branch
+else
+  git worktree add -b "$branch" "$dir" "$base" # new branch off base
+fi
+
+echo
+echo "worktree ready: $dir  (branch: $branch)"
+echo "next:"
+echo "  cd \"$dir\""
+echo "  uv sync --locked --all-packages   # this checkout's own .venv (one-time)"
