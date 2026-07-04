@@ -4,7 +4,9 @@ The model contract is fixed: input ``image`` is ``(1, 3, S, S)`` float32 in ``[0
 (CHW, RGB), output ``box`` is ``(1, 4)`` float32 normalized ``xyxy`` in ``[0, 1]``. A model
 trained with a presence head emits a second output ``presence`` of shape ``(1, 1)`` -- a
 raw objectness logit whose sigmoid is P(target present); the caller thresholds it to decide
-between *one box* and *no box*. That is the whole interface between training and the edge --
+between *one box* and *no box*. A multi-class model adds a third output ``logits`` of shape
+``(1, num_classes)`` -- softmax-argmax names which class the one detected object is. That is
+the whole interface between training and the edge --
 decode to a :class:`BBox` (or the four ``uint8`` values) with the helpers here. onnxruntime
 + numpy are an ``infer`` extra, lazily imported, so the pure-Python core stays
 dependency-free.
@@ -54,6 +56,8 @@ class Detector:
         # A model trained with a presence head also emits a "presence" output (one
         # objectness logit). Box-only models have just "box".
         self.has_presence = "presence" in self.output_names
+        # A multi-class model also emits "logits" (one per class for the detected object).
+        self.has_class = "logits" in self.output_names
 
     def preprocess(self, image: Image.Image):
         from PIL import Image as PILImage
@@ -97,6 +101,23 @@ class Detector:
         # Native float (not numpy) so the result stays json.dumps-able through the serving
         # layers, and ``score >= threshold`` yields a plain bool rather than numpy.bool_.
         return float(1.0 / (1.0 + math.exp(-logit)))
+
+    def detect_class(self, image: Image.Image) -> tuple[int, float]:
+        """The detected object's ``(class_index, softmax_confidence)``.
+
+        ``class_index`` is a 0-based index into the dataset's ordered category names (the
+        same order the multi-class head was trained on); the caller maps it to a name.
+        Raises if the model has no ``logits`` output -- single-class/box-only models have no
+        class to name.
+        """
+        if not self.has_class:
+            raise RuntimeError("model has no class head; this is a single-class detector")
+        np = self._np
+        logits = np.asarray(self._run(image)["logits"], dtype=np.float64).reshape(-1)
+        idx = int(logits.argmax())
+        # Stable softmax (subtract max) for a plain-float confidence in [0, 1].
+        e = np.exp(logits - logits.max())
+        return idx, float(e[idx] / e.sum())
 
 
 def benchmark(detector: Detector, image: Image.Image, *, n: int = 100, warmup: int = 5) -> float:

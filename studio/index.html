@@ -55,6 +55,14 @@
         <div class="block">
           <h2>Classes</h2>
           <div id="classRow" class="class-row"></div>
+          <div class="class-edit">
+            <input id="newClassInput" type="text" placeholder="add a class…" maxlength="40" />
+            <button class="btn ghost" id="addClassBtn">+ add</button>
+            <label class="btn ghost" title="Load class names from a COCO annotations file">
+              import COCO
+              <input type="file" id="importClassesInput" accept=".json,application/json" hidden />
+            </label>
+          </div>
         </div>
 
         <div class="block">

@@ -186,6 +186,8 @@ class Trainer(threading.Thread):
             "err": _f(m["val_err"]),
             "baseline": _f(m["baseline"]),
             "presenceAcc": _f(m["presence_acc"]),
+            "classAcc": _f(m.get("class_acc")),
+            "numClasses": int(m.get("num_classes", 1)),
             "gain": _f(m["gain"]),
             "trainCount": int(m["train_count"]),
             "valCount": int(m["val_count"]),

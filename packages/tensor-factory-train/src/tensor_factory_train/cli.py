@@ -22,6 +22,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         val_frac=args.val_frac,
         box_weight=args.box_weight,
         presence_weight=args.presence_weight,
+        class_weight=args.class_weight,
         augment=args.augment,
         require_review=not args.allow_unreviewed,
         negatives=args.negatives,
@@ -53,6 +54,12 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--box-weight", type=float, default=1.0, help="weight on the box loss")
     f.add_argument(
         "--presence-weight", type=float, default=1.0, help="weight on the objectness loss"
+    )
+    f.add_argument(
+        "--class-weight",
+        type=float,
+        default=1.0,
+        help="weight on the classification loss (only used when the dataset has >1 category)",
     )
     f.add_argument("--augment", action="store_true", help="random flip augmentation")
     f.add_argument(

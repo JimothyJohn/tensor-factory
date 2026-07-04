@@ -121,6 +121,51 @@ def test_unknown_route_404(server):
 
 
 @pytest.mark.unit
+def test_classes_get_and_post_roundtrip(server):
+    base, ds = server
+    code, body = _get(base, "/classes")
+    assert code == 200 and body["classes"] == ["object"]  # default
+    code, body = _post(base, "/classes", json.dumps({"classes": ["bolt", "nut"]}).encode())
+    assert code == 200 and body["classes"] == ["bolt", "nut"]
+    assert ds.classes == ["bolt", "nut"]
+    # /status surfaces the same list so the browser can sync on load
+    _, status = _get(base, "/status")
+    assert status["classes"] == ["bolt", "nut"]
+
+
+@pytest.mark.unit
+def test_post_classes_rejects_malformed_payload(server):
+    base, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/classes", json.dumps({"classes": [1, 2]}).encode())  # not strings
+    assert exc.value.code == 400
+
+
+@pytest.mark.unit
+def test_sample_carries_class_index(server):
+    base, ds = server
+    _post(base, "/classes", json.dumps({"classes": ["a", "b", "c"]}).encode())
+    code, _ = _post(base, "/samples?id=7&present=1&box=0.1,0.2,0.3,0.4&cls=2", _png())
+    assert code == 200
+    assert ds.samples[7]["cls"] == 2
+
+
+@pytest.mark.unit
+def test_sample_defaults_to_class_zero(server):
+    base, ds = server
+    _post(base, "/samples?id=8&present=1&box=0.1,0.2,0.3,0.4", _png())  # no cls
+    assert ds.samples[8]["cls"] == 0
+
+
+@pytest.mark.unit
+def test_non_integer_class_is_400(server):
+    base, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(base, "/samples?id=9&present=1&box=0.1,0.2,0.3,0.4&cls=abc", _png())
+    assert exc.value.code == 400
+
+
+@pytest.mark.unit
 def test_serve_fails_cleanly_when_port_in_use(tmp_path):
     # Regression: a busy port must return 1 with guidance, not crash with a traceback
     # while a zombie server keeps shadowing this one (the "nothing changed" bug).

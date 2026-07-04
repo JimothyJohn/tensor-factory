@@ -29,8 +29,15 @@ class Dataset:
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.neg_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        # fid -> {"present": bool, "box": [x1,y1,x2,y2] | None, "w": int, "h": int}
+        # fid -> {"present": bool, "box": [x1,y1,x2,y2] | None, "cls": int, "w": int, "h": int}
+        # ``cls`` is a 0-based index into ``self.classes`` (the class of the one object in the
+        # frame); it is meaningless for negatives. The detector is single-object, so one box
+        # and one class per frame.
         self.samples: dict[int, dict] = {}
+        # Ordered class names; index is the trained class id. COCO category id is index + 1.
+        # The browser is the source of truth and pushes this list (manual add or COCO import);
+        # a fresh dataset defaults to one class so the box-only path is unchanged.
+        self.classes: list[str] = ["object"]
         self.order: list[int] = []  # upsert order, for cheap regression attribution
         self._load()
 
@@ -40,6 +47,11 @@ class Dataset:
     def _load(self) -> None:
         if self.coco_path.exists():
             coco = json.loads(self.coco_path.read_text(encoding="utf-8"))
+            cats = sorted(coco.get("categories", []), key=lambda c: c["id"])
+            if cats:
+                self.classes = [c["name"] for c in cats]
+            # category id -> 0-based class index, so a non-contiguous COCO id space loads right
+            label_of = {c["id"]: i for i, c in enumerate(cats)}
             ann = {a["image_id"]: a for a in coco.get("annotations", [])}
             for im in coco.get("images", []):
                 a = ann.get(im["id"])
@@ -50,29 +62,48 @@ class Dataset:
                 self.samples[im["id"]] = {
                     "present": True,
                     "box": [x / w, y / h, (x + bw) / w, (y + bh) / h],
+                    "cls": label_of.get(a.get("category_id", 1), 0),
                     "w": w,
                     "h": h,
                 }
         for p in sorted(self.neg_dir.glob("frame_*.png")):
             fid = int(p.stem.split("_")[1])
-            self.samples.setdefault(fid, {"present": False, "box": None, "w": 0, "h": 0})
+            self.samples.setdefault(fid, {"present": False, "box": None, "cls": 0, "w": 0, "h": 0})
         self.order = sorted(self.samples)
 
-    def upsert(self, fid: int, present: bool, box: list[float] | None, png: bytes) -> None:
+    def upsert(
+        self, fid: int, present: bool, box: list[float] | None, png: bytes, cls: int = 0
+    ) -> None:
         img = Image.open(io.BytesIO(png)).convert("RGB")
         w, h = img.size
+        # Clamp to a known class -- a stale/out-of-range index from the browser falls back to
+        # the first class rather than writing a category_id with no matching category.
+        cls = cls if 0 <= cls < len(self.classes) else 0
         with self._lock:
             # a frame lives in exactly one of images/ or negatives/ -- clear both first
             (self.images_dir / self._name(fid)).unlink(missing_ok=True)
             (self.neg_dir / self._name(fid)).unlink(missing_ok=True)
             if present and box:
                 img.save(self.images_dir / self._name(fid))
-                self.samples[fid] = {"present": True, "box": list(box), "w": w, "h": h}
+                self.samples[fid] = {"present": True, "box": list(box), "cls": cls, "w": w, "h": h}
             else:
                 img.save(self.neg_dir / self._name(fid))
-                self.samples[fid] = {"present": False, "box": None, "w": w, "h": h}
+                self.samples[fid] = {"present": False, "box": None, "cls": 0, "w": w, "h": h}
             if fid not in self.order:
                 self.order.append(fid)
+            self._write_coco()
+
+    def set_classes(self, names: list[str]) -> None:
+        """Replace the ordered class list (browser pushes it on add/edit/COCO import).
+
+        Indices are the contract: a box's stored ``cls`` is an index into this list, so the
+        browser keeps the two aligned. Rewrites the COCO categories immediately so the next
+        training round sees the new names. Empty/blank entries are dropped; an empty result
+        falls back to a single ``object`` class so the box-only path always works.
+        """
+        cleaned = [n.strip() for n in names if n and n.strip()]
+        with self._lock:
+            self.classes = cleaned or ["object"]
             self._write_coco()
 
     def _write_coco(self) -> None:
@@ -94,11 +125,15 @@ class Dataset:
                     "review": "approved",
                 }
             )
+            # Clamp into the current class range so shrinking the class list (set_classes)
+            # can never leave a sample pointing at a category that no longer exists.
+            cls = min(max(s.get("cls", 0), 0), len(self.classes) - 1)
             annotations.append(
                 {
                     "id": aid,
                     "image_id": fid,
-                    "category_id": 1,
+                    # COCO category ids are 1-based; our class index is 0-based.
+                    "category_id": cls + 1,
                     "bbox": bbox,
                     "area": bbox[2] * bbox[3],
                     "iscrowd": 0,
@@ -109,7 +144,7 @@ class Dataset:
         coco = {
             "images": images,
             "annotations": annotations,
-            "categories": [{"id": 1, "name": "object"}],
+            "categories": [{"id": i + 1, "name": n} for i, n in enumerate(self.classes)],
         }
         self.coco_path.write_text(json.dumps(coco, indent=2), encoding="utf-8")
 
