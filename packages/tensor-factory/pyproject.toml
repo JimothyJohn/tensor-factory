@@ -13,7 +13,7 @@ dependencies = []
 infer = [
     "onnxruntime>=1.17",
     "numpy>=1.24",
-    "pillow>=10",
+    "pillow>=12.3.0",
 ]
 
 [project.scripts]

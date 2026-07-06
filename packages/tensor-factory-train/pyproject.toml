@@ -8,7 +8,7 @@ license = "Apache-2.0"
 dependencies = [
     "tensor-factory",
     "numpy>=1.24",
-    "pillow>=10",
+    "pillow>=12.3.0",
     "onnxruntime>=1.17",
 ]
 
