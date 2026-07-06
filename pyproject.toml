@@ -13,7 +13,7 @@ package = false
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "hypothesis>=6.155.7",
+    "hypothesis>=6.156.1",
     "ruff>=0.15.20",
     "ty",
     # Inference runtime + ONNX fixtures so the gate exercises the detector.
