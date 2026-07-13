@@ -16,7 +16,7 @@ dependencies = [
 # torch is the only heavy bit. Pull for a training run with
 # `uv pip install torch` (or sync this extra) on a CUDA box or this Mac's MPS.
 train = [
-    "torch>=2.2",
+    "torch>=2.13.0",
 ]
 
 [project.scripts]
