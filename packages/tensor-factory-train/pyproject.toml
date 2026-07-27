@@ -9,7 +9,7 @@ dependencies = [
     "tensor-factory",
     "numpy>=1.24",
     "pillow>=12.3.0",
-    "onnxruntime>=1.17",
+    "onnxruntime>=1.28.0",
 ]
 
 [project.optional-dependencies]
