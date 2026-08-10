@@ -13,13 +13,13 @@ package = false
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "hypothesis>=6.157.0",
-    "ruff>=0.15.22",
+    "hypothesis>=6.165.2",
+    "ruff>=0.16.1",
     "ty",
     # Inference runtime + ONNX fixtures so the gate exercises the detector.
     # torch is intentionally NOT here: training is a heavy offline step, run via
     # the tensor-factory-train 'train' extra, not part of CI.
-    "onnxruntime>=1.17",
+    "onnxruntime>=1.28.0",
     "numpy>=1.24",
     "onnx>=1.16",
 ]
