@@ -11,7 +11,7 @@ dependencies = []
 # CPU inference runtime. Pure-Python core stays dependency-free; pull this on the
 # edge device with `uv pip install 'tensor-factory[infer]'`.
 infer = [
-    "onnxruntime>=1.17",
+    "onnxruntime>=1.28.0",
     "numpy>=1.24",
     "pillow>=12.3.0",
 ]
