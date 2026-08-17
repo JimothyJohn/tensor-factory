@@ -13,8 +13,8 @@ package = false
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "hypothesis>=6.165.2",
-    "ruff>=0.16.1",
+    "hypothesis>=6.165.7",
+    "ruff>=0.16.3",
     "ty",
     # Inference runtime + ONNX fixtures so the gate exercises the detector.
     # torch is intentionally NOT here: training is a heavy offline step, run via
