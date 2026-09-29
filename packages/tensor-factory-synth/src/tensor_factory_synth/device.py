@@ -18,7 +18,13 @@ def resolve_device(prefer: str | None = None) -> str:
     ``prefer`` (one of ``cuda``/``mps``/``cpu``) wins when it is actually available;
     otherwise availability is probed in ``cuda -> mps -> cpu`` order. Returns ``"cpu"``
     if torch is not installed.
+
+    Raises:
+        ValueError: if ``prefer`` is given and is not one of ``cuda``/``mps``/``cpu``.
     """
+    if prefer is not None and prefer not in _VALID:
+        raise ValueError(f"prefer must be one of {_VALID}, got {prefer!r}")
+
     try:
         import torch  # ty: ignore[unresolved-import]
     except ModuleNotFoundError:

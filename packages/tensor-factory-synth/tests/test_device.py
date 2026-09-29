@@ -15,6 +15,12 @@ def test_resolve_device_cpu_preference_without_torch():
 
 
 @pytest.mark.unit
+def test_resolve_device_rejects_invalid_preference():
+    with pytest.raises(ValueError):
+        resolve_device("gpu")
+
+
+@pytest.mark.unit
 def test_enable_mps_fallback_sets_env(monkeypatch):
     monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
     enable_mps_fallback()
