@@ -24,6 +24,10 @@ def _make_const_model(path, coords, size=8):
     )
     graph = helper.make_graph([const], "const_detector", [image], [box])
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    # onnx>=1.23 defaults new models to IR version 14, ahead of what the
+    # pinned onnxruntime can load (max 13) -- pin explicitly for this
+    # hand-built test model.
+    model.ir_version = 13
     onnx.checker.check_model(model)
     onnx.save(model, str(path))
 
