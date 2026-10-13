@@ -53,15 +53,17 @@ def _flip_box(
 
 
 class _BoxDataset(Dataset):
-    """Yields ``(image, box)`` for box-only training, or ``(image, box, has_box)`` when
-    ``presence`` is set. Items are always ``(path, box | None)``. One dataset, both heads.
+    """Yields ``(image, box, has_box)`` for every item, box-only or presence training alike.
+    Items are always ``(path, box | None)``. One dataset, both heads.
 
-    A negative (no-object) item has ``box is None``: the image still trains the presence
-    head toward *absent* (objectness target 0), but ``has_box == 0`` doubles as the mask
-    that keeps it out of the box-regression loss -- a no-object frame has no box to fit.
-    For a positive, ``has_box == 1`` is both the box mask and the objectness target.
-    ``augment`` adds random horizontal/vertical flips (image and box transformed together;
-    a box-less image just flips the pixels).
+    ``has_box`` is always returned (not just when ``presence`` is set) so every item has the
+    same tuple shape regardless of training mode -- callers that don't use the presence head
+    simply ignore the third element. A negative (no-object) item has ``box is None``: the
+    image still trains the presence head toward *absent* (objectness target 0), but
+    ``has_box == 0`` doubles as the mask that keeps it out of the box-regression loss -- a
+    no-object frame has no box to fit. For a positive, ``has_box == 1`` is both the box mask
+    and the objectness target. ``augment`` adds random horizontal/vertical flips (image and
+    box transformed together; a box-less image just flips the pixels).
     """
 
     def __init__(
@@ -90,10 +92,9 @@ class _BoxDataset(Dataset):
                 if has_box:
                     coords = _flip_box(coords, horizontal=False)
         y = torch.tensor(coords, dtype=torch.float32)
-        if self.presence:
-            # has_box is both the objectness target and the box-loss mask.
-            return x, y, torch.tensor(float(has_box), dtype=torch.float32)
-        return x, y
+        # has_box is both the objectness target and the box-loss mask when presence is on;
+        # it's unused (but always present, for a consistent tuple shape) otherwise.
+        return x, y, torch.tensor(float(has_box), dtype=torch.float32)
 
 
 def export_onnx(
@@ -262,8 +263,10 @@ def fit(
         total = 0.0
         for data in loader:
             optimizer.zero_grad()
+            # _BoxDataset always yields (image, box, has_box); has_box is unused below when
+            # presence is off.
+            x, yb, m = (d.to(dev) for d in data)
             if presence:
-                x, yb, m = (d.to(dev) for d in (data[0], data[1], data[2]))
                 pb, plogit = model(x)
                 # Box loss only over box-bearing items; negatives (mask 0) contribute none.
                 # The same mask m is the objectness target: 1 for positives, 0 for negatives.
@@ -273,7 +276,6 @@ def fit(
                     plogit.reshape(-1), m
                 )
             else:
-                x, yb = data[0].to(dev), data[1].to(dev)
                 loss = box_weight * box_loss(model(x), yb)
             loss.backward()
             optimizer.step()
