@@ -31,7 +31,8 @@ class Detection:
 
 
 class AutoLabeler(Protocol):
-    def label(self, image: Image.Image, features: Sequence[str]) -> list[Detection]: ...
+    def label(self, image: Image.Image, features: Sequence[str]) -> list[Detection]:
+        pass
 
 
 class GroundingDinoAutoLabeler:
