@@ -30,7 +30,8 @@ class GeneratedSample:
 
 
 class Generator(Protocol):
-    def generate(self, prompt: str, seed: int, *, size: int = DEFAULT_SIZE) -> GeneratedSample: ...
+    def generate(self, prompt: str, seed: int, *, size: int = DEFAULT_SIZE) -> GeneratedSample:
+        pass
 
 
 class MockGenerator:
