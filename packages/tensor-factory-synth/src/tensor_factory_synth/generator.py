@@ -92,7 +92,7 @@ class NanoBananaGenerator:
         try:
             # `google` is a namespace package (protobuf et al. occupy it), so an absent
             # `genai` raises ImportError, not ModuleNotFoundError -- catch both.
-            from google import genai  # ty: ignore[unresolved-import]
+            from google import genai  # ty: ignore[import-not-found]
         except ImportError as exc:
             raise RuntimeError(
                 "NanoBananaGenerator needs the 'gemini' extra: uv sync --extra gemini"
@@ -111,7 +111,7 @@ class NanoBananaGenerator:
         size: int = DEFAULT_SIZE,
         reference: Image.Image | None = None,
     ) -> GeneratedSample:
-        from google.genai import types  # ty: ignore[unresolved-import]
+        from google.genai import types  # ty: ignore[import-not-found]
 
         # A reference photo conditions the model on the real part's appearance (the fix for
         # subjects it renders wrong from text alone). Image first, then the instruction.

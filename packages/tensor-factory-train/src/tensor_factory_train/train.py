@@ -15,10 +15,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
-import torch  # ty: ignore[unresolved-import]
+import torch  # ty: ignore[import-not-found]
 from PIL import Image
-from torch import nn  # ty: ignore[unresolved-import]
-from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import]
+from torch import nn  # ty: ignore[import-not-found]
+from torch.utils.data import DataLoader, Dataset  # ty: ignore[import-not-found]
 
 from tensor_factory.review import review_summary
 

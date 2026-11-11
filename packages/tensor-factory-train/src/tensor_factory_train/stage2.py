@@ -24,9 +24,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import torch  # ty: ignore[unresolved-import]
-import torch.nn.functional as F  # ty: ignore[unresolved-import]
-from torch import nn  # ty: ignore[unresolved-import]
+import torch  # ty: ignore[import-not-found]
+import torch.nn.functional as F  # ty: ignore[import-not-found]
+from torch import nn  # ty: ignore[import-not-found]
 
 # Damage taxonomy in head-logit order, so an exported model stays self-describing (the names
 # travel as ONNX metadata exactly as the stage-1 presence model carries its own contract).

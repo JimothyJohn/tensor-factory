@@ -26,7 +26,7 @@ def resolve_device(prefer: str | None = None) -> str:
         raise ValueError(f"prefer must be one of {_VALID}, got {prefer!r}")
 
     try:
-        import torch  # ty: ignore[unresolved-import]
+        import torch  # ty: ignore[import-not-found]
     except ModuleNotFoundError:
         return "cpu"
 
