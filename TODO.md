@@ -142,9 +142,10 @@ load-bearing for the target.
 - [ ] **Validate / tighten `real_ds_more` labels (optional, for box precision).** 168
   GroundingDINO boxes, 39 corrected so far in Label Studio project 4. Only worth it if
   chasing box precision — present/absent is already fine on the raw labels.
-- [ ] **Multi-dir training support.** Combining datasets is currently a manual merge into
-  one dir (`real_ds_combined`). Add multi-`--data` support to `fit`/the loaders so datasets
-  compose without copying images.
+- [x] **Multi-dir training support.** `fit` / `--data` take several dataset dirs, read in
+  place: classes merge by name, each source is held out and scored separately (stdout at
+  the best checkpoint, `sources` in `on_epoch`). The Studio takes `--source DIR` and shows
+  the per-source table live. `real_ds_combined` no longer needs to exist.
 - [ ] **Push precision higher (optional).** More data + native 1024 px (resolve coil
   texture) and/or a wider model for the subtle, recessed helicoils.
 

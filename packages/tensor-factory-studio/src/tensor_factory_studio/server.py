@@ -333,6 +333,8 @@ def serve(
     width: int = 16,
     epochs: int = 20,
     batch: int = 16,
+    sources: Sequence[str | Path] = (),
+    allow_unreviewed: bool = False,
 ) -> int:
     # Resolve to absolute: _serve_static compares against resolved targets, and a relative
     # ui_dir would make every relative_to() check raise and 404 the whole UI.
@@ -341,8 +343,23 @@ def serve(
         print(f"UI not found at {ui} -- pass --ui-dir to point at the studio/ directory")
         return 2
     data = Path(data_dir) if data_dir else ui / ".data"
+    # Fail before binding: a typo in --source would otherwise surface as a train error in
+    # the browser long after launch.
+    for src in sources:
+        if not (Path(src) / "annotations.coco.json").is_file():
+            print(f"--source {src}: no annotations.coco.json there (expected a COCO dataset dir)")
+            return 2
     dataset = Dataset(data)
-    trainer = Trainer(dataset, data / "models", size=size, width=width, epochs=epochs, batch=batch)
+    trainer = Trainer(
+        dataset,
+        data / "models",
+        size=size,
+        width=width,
+        epochs=epochs,
+        batch=batch,
+        sources=sources,
+        require_review=not allow_unreviewed,
+    )
     # Bind BEFORE starting the trainer so a port clash fails loudly instead of leaving a
     # zombie server (or a previous instance) shadowing this one -- you'd be talking to the
     # wrong process and never see your changes.
@@ -385,6 +402,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--width", type=int, default=16, help="base channel width")
     p.add_argument("--epochs", type=int, default=20, help="epochs per retrain round")
     p.add_argument("--batch", type=int, default=16)
+    p.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="extra COCO dataset dir to train alongside the frames labeled here (repeatable); "
+        "read in place and scored separately in the trainer panel",
+    )
+    p.add_argument(
+        "--allow-unreviewed",
+        action="store_true",
+        help="train on un-validated labels in --source dirs too (default: approved only)",
+    )
     a = p.parse_args(argv)
     return serve(
         a.host,
@@ -395,6 +425,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         width=a.width,
         epochs=a.epochs,
         batch=a.batch,
+        sources=a.source,
+        allow_unreviewed=a.allow_unreviewed,
     )
 
 

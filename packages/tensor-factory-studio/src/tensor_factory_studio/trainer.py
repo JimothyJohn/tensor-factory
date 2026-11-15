@@ -7,6 +7,11 @@ guardrail: a round's checkpoint is only *promoted* to the served model if its be
 center-error beats the global best; otherwise the previous served model stays live and the
 round is flagged a regression with the likely-bad (most-recently-added) sample ids.
 
+Extra ``sources`` (dataset dirs on disk: an earlier Studio session, a synthetic set, a
+Label Studio pull) train alongside the frames labeled in the browser, read in place.
+Every round reports each source separately, so the live panel shows which data the model
+is good on and which it is not.
+
 torch is imported lazily in :meth:`run` so importing this module needs no ``serve`` extra.
 """
 
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 from .dataset import Dataset
@@ -36,6 +42,8 @@ class Trainer(threading.Thread):
         batch: int = 16,
         min_positives: int = 4,
         device: str | None = None,
+        sources: Sequence[str | Path] = (),
+        require_review: bool = True,
     ) -> None:
         super().__init__(daemon=True)
         self.dataset = dataset
@@ -47,9 +55,15 @@ class Trainer(threading.Thread):
         self.batch = batch
         self.min_positives = min_positives
         self._device_pref = device
+        self.sources = [Path(s) for s in sources]
+        self.require_review = require_review
 
         self._lock = threading.Lock()
         self._dirty = threading.Event()
+        if self.sources:
+            # Data is already on disk: train a first model before anything is labeled, so
+            # the browser has predictions to correct from frame one.
+            self._dirty.set()
         self._stop = threading.Event()
         self.paused = False
 
@@ -113,10 +127,15 @@ class Trainer(threading.Thread):
                 continue
             self._dirty.clear()
             c = self.dataset.counts()
-            if c["positives"] < self.min_positives:
+            if not self.sources and c["positives"] < self.min_positives:
                 self._status(f"need ≥{self.min_positives} positives ({c['positives']} now)")
                 continue
             self._round(fit)
+
+    def _data_dirs(self) -> list[Path]:
+        """The browser-labeled set (once it has a positive) followed by the extra sources."""
+        own = [self.dataset.root] if self.dataset.counts()["positives"] else []
+        return [*own, *self.sources]
 
     def _round(self, fit) -> None:
         round_out = self.models_dir / "_round.onnx"
@@ -133,7 +152,7 @@ class Trainer(threading.Thread):
 
         try:
             path = fit(
-                self.dataset.root,
+                self._data_dirs(),
                 round_out,
                 epochs=self.epochs,
                 batch=self.batch,
@@ -143,6 +162,7 @@ class Trainer(threading.Thread):
                 presence=True,
                 val_frac=0.2,
                 negatives=[self.dataset.root / "negatives"],
+                require_review=self.require_review,
                 on_epoch=on_epoch,
             )
         except Exception as exc:  # noqa: BLE001 -- surface to the UI, keep the thread alive
@@ -191,6 +211,17 @@ class Trainer(threading.Thread):
             "gain": _f(m["gain"]),
             "trainCount": int(m["train_count"]),
             "valCount": int(m["val_count"]),
+            "sources": [
+                {
+                    "name": str(s["name"]),
+                    "train": int(s["train"]),
+                    "val": int(s["val"]),
+                    "err": _f(s["val_err"]),
+                    "presenceAcc": _f(s["presence_acc"]),
+                    "classAcc": _f(s["class_acc"]),
+                }
+                for s in m.get("sources", [])
+            ],
             "regressed": False,
             "suspects": [],
         }

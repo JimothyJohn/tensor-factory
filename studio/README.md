@@ -44,6 +44,20 @@ uv run tensor-factory-studio   # serves UI + API on http://127.0.0.1:8089
 Flags: `--port --data-dir --ui-dir --size --width --epochs --batch`. For a snappier dev
 loop on CPU, a smaller model trains faster: `--size 96 --width 8 --epochs 4`.
 
+### Train on data you already have
+
+```bash
+uv run tensor-factory-studio --source path/to/dataset --source path/to/another
+```
+
+Each `--source` is a dataset dir (`annotations.coco.json` + `images/`): an earlier Studio
+session's data dir, a synthetic set, a Label Studio pull. They are read in place and train
+together with the frames you label here. With a source given the trainer starts at once,
+so there are predictions to correct from the first frame. The trainer panel lists every
+source with its own held-out error and presence accuracy, updated each epoch, so you can
+see which data the model is weak on. `--allow-unreviewed` includes labels nobody has
+approved yet.
+
 ## Workflow
 
 1. **Load video** — frames are sampled at `fps`; any within `dedup` Hamming bits of one

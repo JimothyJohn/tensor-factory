@@ -77,6 +77,51 @@ def load_coco_labeled(
     return items, names
 
 
+def source_names(dirs: Sequence[str | Path]) -> list[str]:
+    """One short display name per source directory: its basename, de-duplicated.
+
+    Two sources that share a basename (``a/frames`` and ``b/frames``) become ``frames``
+    and ``frames-2`` so per-source metrics never merge two different datasets.
+    """
+    names: list[str] = []
+    for d in dirs:
+        base = Path(d).resolve().name or "data"
+        name, n = base, 1
+        while name in names:
+            n += 1
+            name = f"{base}-{n}"
+        names.append(name)
+    return names
+
+
+def load_sources(
+    data_dirs: Sequence[str | Path],
+    *,
+    require_review: bool = True,
+) -> tuple[list[tuple[Path, BBox, int, int]], list[str]]:
+    """Load several COCO dataset dirs as one training set, without copying images.
+
+    Returns ``(image_path, BBox, label, source)`` items plus the merged class names.
+    ``source`` is the index of the directory the item came from, in ``data_dirs`` order.
+    Classes are merged **by name** in first-seen order, so two sources that both call
+    their object ``helicoil`` share one class id even when their COCO category ids differ,
+    and a source that adds a new name extends the list rather than colliding with an id.
+    """
+    names: list[str] = []
+    items: list[tuple[Path, BBox, int, int]] = []
+    for src, d in enumerate(data_dirs):
+        root = Path(d)
+        labeled, local = load_coco_labeled(
+            root / "annotations.coco.json", root, require_review=require_review
+        )
+        for n in local:
+            if n not in names:
+                names.append(n)
+        remap = [names.index(n) for n in local]
+        items.extend((path, box, remap[lbl], src) for path, box, lbl in labeled)
+    return items, names
+
+
 def baseline_center_err(
     train_items: Sequence[tuple],
     val_items: Sequence[tuple],
