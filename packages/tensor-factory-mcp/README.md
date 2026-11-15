@@ -44,11 +44,62 @@ plain HTTP (stdlib `http.server`, no extra deps). Binds `127.0.0.1` by default �
 ```bash
 tensor-factory-http --port 8088              # then:
 curl http://127.0.0.1:8088/health            # {"status": "ok"}
-curl http://127.0.0.1:8088/model_info        # resolved model + ORT providers
+curl http://127.0.0.1:8088/model_info        # resolved model + sha256, engine, providers
 curl --data-binary @frame.png http://127.0.0.1:8088/detect   # raw image bytes -> detection JSON
 ```
 
 `POST /detect` takes the raw image bytes as the request body and returns the same JSON as
 the `tensor_factory_detect` tool. Bad image bytes → `400`; bodies over `--max-mb` → `413`.
+
+**Swap the model without a restart.** The server re-checks the model file on every
+request. Replace it atomically and the next request runs the new model:
+
+```bash
+scp new.onnx device:model.onnx.incoming && ssh device mv model.onnx.incoming model.onnx
+curl http://device:8088/model_info           # "sha256" is now the new file's
+```
+
+If the replacement does not load (half-copied, corrupt), the model that was working keeps
+serving and `/model_info` carries a `reload_error` saying why.
+
+## Edge: the whole deployment is one file
+
+`tensor-factory-bundle` packs the runtime, the HTTP server and a model into a single
+runnable `.pyz` (about 100 KB with the bundled detector). The device needs CPython ≥ 3.11
+and nothing else: no pip, no venv, no wheels.
+
+```bash
+tensor-factory-bundle --model model.onnx --out edge.pyz   # on your machine
+scp edge.pyz device:                                      # the deployment
+ssh device python3 edge.pyz --host 0.0.0.0 --port 8088    # serves POST /detect
+```
+
+- **Engine.** If onnxruntime is installed on the device it is used (~200 fps on a laptop
+  CPU); otherwise the bundled pure-Python engine runs (~1 fps). Same JSON either way.
+- **Verify.** The build prints the model's sha256; `/model_info` on the device reports the
+  sha256 of what is actually loaded. They must match.
+- **Flags.** Every `tensor-factory-http` flag passes through. `--model PATH` serves a file
+  outside the bundle, which is the one to use with the hot swap above.
+- **Reproducible.** The same sources and model produce a byte-identical bundle.
+- **Proven on ARM.** CI builds a bundle and serves a detection from it on a bare
+  `python:3.12-slim` container on both x86-64 and aarch64 Linux.
+
+To keep it running across reboots on a systemd device, a user unit is enough (no root):
+
+```ini
+# ~/.config/systemd/user/tensor-factory.service
+[Unit]
+Description=tensor-factory detector
+
+[Service]
+ExecStart=/usr/bin/python3 %h/edge.pyz --host 0.0.0.0 --port 8088
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+`systemctl --user enable --now tensor-factory`, and `loginctl enable-linger $USER` so it
+starts without a login. The endpoint has no authentication: bind it to a network you trust.
 
 Licensed under Apache-2.0.

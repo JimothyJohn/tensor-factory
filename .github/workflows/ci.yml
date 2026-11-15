@@ -82,8 +82,14 @@ jobs:
   # The Doom test: the pipeline must run on a bare CPython with no wheels installed.
   # The unit suite proves this with an import blocker; this job proves it with an
   # actually-empty environment -- no uv, no venv, no pip install of any kind.
+  # Runs on x86-64 and on aarch64 -- the second is the deployment target (a Linux ARM
+  # single-board computer), so the edge bundle is proven on that architecture every push.
   portability:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     container: python:3.12-slim
     steps:
       - uses: actions/checkout@v7

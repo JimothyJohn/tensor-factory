@@ -41,6 +41,16 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
   `127.0.0.1` by default.
+- **Edge = one file.** `tensor-factory-bundle --model M --out edge.pyz` packs
+  `tensor_factory` (zerort included), the stdlib HTTP server and the model into a
+  reproducible zipapp (~100 KB); `python3 edge.pyz` on a bare CPython ≥ 3.11 serves
+  `/detect`. The model is unpacked to `~/.cache/tensor-factory/` (sha256-verified each
+  start). `scripts/portability_check.py` step 5 builds and runs one with `-S -I`, and the
+  CI `portability` job runs it on x86-64 and aarch64 Linux.
+- **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
+  the file (atomically: write beside, `mv` over) and the next request loads it. A
+  replacement that fails to load keeps the old model serving; `/model_info` reports
+  `sha256` of what is loaded and `reload_error` when a swap failed.
 - **Presence head / negatives.** The detector returns one box or none, YOLO-style. A single
   objectness logit (`TinyDetector(presence=True)`, ONNX output `presence`) is trained by
   `--negatives DIR`: positives → objectness 1, no-object negatives → objectness 0 with box

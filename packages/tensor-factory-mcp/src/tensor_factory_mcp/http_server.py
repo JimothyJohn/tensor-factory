@@ -7,13 +7,17 @@ MCP tools use, so the JSON is byte-identical.
 
 Routes:
   ``GET  /health``     -> ``{"status": "ok"}``
-  ``GET  /model_info`` -> resolved model path, input size, IO name, ORT providers
+  ``GET  /model_info`` -> resolved model path + sha256, input size, IO name, ORT providers
   ``POST /detect``     -> request body is raw image bytes; returns the detection JSON
 
 Example::
 
     tensor-factory-http --port 8088 &
     curl --data-binary @frame.png http://127.0.0.1:8088/detect
+
+The model file is re-checked on every request: replace it (``mv new.onnx model.onnx``) and
+the next request runs the new model, no restart. A replacement that fails to load leaves
+the previous model serving and shows up as ``reload_error`` in ``/model_info``.
 
 Binds ``127.0.0.1`` by default -- a detector on a dev box is not public-by-default; pass
 ``--host 0.0.0.0`` to expose it deliberately.
@@ -128,7 +132,8 @@ def serve(
     )
     model = core.resolve_model(model_path)
     bound = httpd.server_address[1]
-    print(f"tensor-factory-http on http://{host}:{bound}  (model: {model})")
+    # Flushed: under a pipe or systemd this line is how the caller learns the bound port.
+    print(f"tensor-factory-http on http://{host}:{bound}  (model: {model})", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
