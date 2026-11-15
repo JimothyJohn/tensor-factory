@@ -37,12 +37,18 @@ the blocker; items 4–6 wait on it. Item 1 (architecture) is done and unit-test
 pass — there is no synthetic shortcut that produces meaningful damage/seating labels.
 
 Capacity/roadmap analysis: [`MODEL_SIZE.md`](MODEL_SIZE.md). v5 (box + YOLO-style objectness)
-is the tiny base and doubles as the SBC **stage-1** region proposer; v6 adds a **stage-2 crop
+is the tiny base and doubles as the **stage-1** region proposer; v6 adds a **stage-2 crop
 head** that reports state on the high-res crop. Insertion is a *measurement* (regress a signed
 seating depth → over/correct/under), damage is a *classification*
-(`ok/deformed/cross_threaded/broken_tang/burr`). A PC teacher then trains + pre-annotates, and
-the SBC student distils down to an MCU good/bad flag. Spend resolution only on the crop; keep
-stage 1 MCU-portable.
+(`ok/deformed/cross_threaded/broken_tang/burr`). A PC teacher then trains + pre-annotates and
+distils down to the deployment student. Spend resolution only on the crop.
+
+**Target platform (decided 2026-07-02): a tiny ARM PC** — a Linux-class aarch64 SBC
+(Raspberry-Pi tier), because the workload will grow past simple detection. Both stages run
+on the SBC under onnxruntime (zerort as the floor); the MCU tier below is **deferred** and
+MCU constraints (no-FPU math, 4-byte wire frames, width-8/128px coarsening) are no longer
+design drivers. The 4×uint8 box codec stays as the canonical compact form but is not
+load-bearing for the target.
 
 - [x] **1. Stage-2 crop head (architecture).** `Stage2Head` on the predicted-box crop: damage
   softmax + signed `seating` regressor, plus a `crop_to_box` stage-1→2 bridge and int8 ONNX
@@ -60,10 +66,20 @@ stage 1 MCU-portable.
 - [ ] **4. PC teacher.** Larger multi-task backbone @1024px; use it to pre-annotate (bootstrap
   label quality past GroundingDINO). Ties into the model-in-the-loop item under "Now".
 - [ ] **5. SBC two-stage student**, distilled from the teacher (soft targets + seg distill).
-- [ ] **6. Distill + coarsen to MCU** — single-stage v5 shape + one binary `suspect` flag,
-  width 8 / 128px / int8.
+  This is now the deployment tier (ARM SBC), not an intermediate.
+- [ ] ~~**6. Distill + coarsen to MCU**~~ — **deferred 2026-07-02** (target platform is an
+  ARM SBC; revisit only if a genuinely MCU-bound deployment appears).
 
 ## Recently done (this session)
+
+- [x] **zerort: zero-dependency inference floor — roadmap items 1–5 all landed.**
+  Pure-stdlib runtime under `tensor_factory.zerort` (protobuf reader + flat `.tfm`
+  container, int8 op set with bigint-SIMD ConvInteger, PNG/baseline-JPEG/PPM decode,
+  triangle resize), zero-dep HTTP serving, and a CI portability job on a bare
+  `python:3.12-slim`. Parity-tested against onnxruntime (exact integer kernels,
+  <=5e-3 full-model, import-blocked subprocess proofs). Status lives in
+  [`ROADMAP.md`](ROADMAP.md); the only open roadmap item (GroundingDINO exit) is
+  gated on model quality above.
 
 - [x] **In-browser demo (`docs/demo.html`).** Runs the bundled int8 models entirely
   client-side via onnxruntime-web (WASM, single-threaded so it works on plain static hosts):

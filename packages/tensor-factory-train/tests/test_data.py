@@ -1,9 +1,20 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from tensor_factory.geometry import BBox
-from tensor_factory_train.data import load_coco_boxes, load_coco_labeled, load_negatives
+from tensor_factory_train.data import (
+    baseline_center_err,
+    load_coco_boxes,
+    load_coco_labeled,
+    load_negatives,
+)
+
+
+def _box_at(cx: float, cy: float, half: float = 0.05) -> BBox:
+    """A small box centered at (cx, cy) in normalized coords."""
+    return BBox(cx - half, cy - half, cx + half, cy + half)
 
 
 @pytest.mark.unit
@@ -154,3 +165,36 @@ def test_review_gate_applies_to_labeled_loader(tmp_path):
     p.write_text(json.dumps(_mixed_review_coco()))
     items, _ = load_coco_labeled(p, tmp_path)
     assert len(items) == 1
+
+
+@pytest.mark.unit
+def test_baseline_center_err_fits_on_train_scores_on_val():
+    # Constant is the *train* mean center (0.5, 0.5); val centers sit 0/0.1/0.2 away in x.
+    # Distances at size=480: 0, 48, 96 px -> median 48. Proves it's median, not mean (= 48).
+    train = [(Path("t.png"), _box_at(0.5, 0.5)) for _ in range(4)]
+    val = [
+        (Path("v0.png"), _box_at(0.5, 0.5)),
+        (Path("v1.png"), _box_at(0.6, 0.5)),
+        (Path("v2.png"), _box_at(0.7, 0.5)),
+    ]
+    assert baseline_center_err(train, val, size=480) == pytest.approx(48.0)
+
+
+@pytest.mark.unit
+def test_baseline_center_err_uses_train_mean_not_val_mean():
+    # Train centers average to x=0.3; a val box exactly at 0.3 must score ~0, proving the
+    # constant comes from train (a val-fit constant would instead center on the val mean).
+    train = [(Path("a.png"), _box_at(0.2, 0.5)), (Path("b.png"), _box_at(0.4, 0.5))]
+    val = [(Path("v.png"), _box_at(0.3, 0.5))]
+    assert baseline_center_err(train, val, size=480) == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.unit
+def test_baseline_center_err_skips_none_boxes_and_handles_empty():
+    # Negatives (None box) are skipped, not crashed on.
+    train = [(Path("p.png"), _box_at(0.5, 0.5)), (Path("neg.png"), None)]
+    val = [(Path("v.png"), _box_at(0.6, 0.5)), (Path("vneg.png"), None)]
+    assert baseline_center_err(train, val, size=480) == pytest.approx(48.0)
+    # No box-bearing item in a split -> no comparison possible.
+    assert baseline_center_err(train, [(Path("x.png"), None)], size=480) is None
+    assert baseline_center_err([(Path("x.png"), None)], val, size=480) is None

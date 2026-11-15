@@ -10,9 +10,6 @@
   // Light gallery wall is the default; honor a stored dark preference before first paint.
   try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -48,13 +45,13 @@
       <div class="quarter"></div>
       <div class="square"></div>
     </div>
-    <p class="kicker" data-rise style="--d:.05s">Tiny-CNN object detection · Apache-2.0</p>
-    <h1 data-rise style="--d:.12s">A prompt<br />becomes a tiny<br /><em>detector</em>.</h1>
-    <p class="lede" data-rise style="--d:.24s">
+    <p class="kicker">Tiny-CNN object detection · Apache-2.0</p>
+    <h1>A prompt becomes a tiny <em>detector</em>.</h1>
+    <p class="lede">
       tensor-factory turns a text prompt into a synthetic dataset, an int8 ONNX model,
       and a CPU inference harness. No GPU at runtime. No AGPL anywhere.
     </p>
-    <div class="actions" data-rise style="--d:.34s">
+    <div class="actions">
       <a class="link-arrow primary" href="demo.html">Live demo <span class="a">→</span></a>
       <a class="link-arrow" href="https://github.com/JimothyJohn/tensor-factory">GitHub <span class="a">↗</span></a>
     </div>
@@ -73,9 +70,26 @@
     </div>
   </section>
 
+  <section id="studio">
+    <div class="col sec-pad">
+      <p class="eyebrow">Fig. 02 — The Studio · supervise, don't label</p>
+      <p class="prose">
+        The training UI is the fastest way from a video to a deployed detector. The premise:
+        you orchestrate, the machine does the labor.
+      </p>
+      <div class="pkg"><div class="name">Busywork never arrives</div><p class="desc">Frames are sampled at your fps and a perceptual-hash gate drops near-duplicates at ingest — every frame that reaches your screen is worth your attention.</p></div>
+      <div class="pkg"><div class="name">Nudge, don't draw</div><p class="desc">The trainer runs continuously as you label; each frame arrives pre-filled with the model's current guess. Most are a glance and a Space — and when a guess is off, the drag that fixes it is exactly the training signal the model was missing.</p></div>
+      <div class="pkg"><div class="name">Bad samples get caught</div><p class="desc">Nothing enters the dataset unconfirmed, and a guardrail watches validation every round — regressions point at the likely-bad samples, clickable, so you fix or drop and move on.</p></div>
+      <div class="pkg"><div class="name">The export is the deployable</div><p class="desc">The same trainer that builds the bundled models emits the canonical int8 ONNX — the model you nudged is the model you ship.</p></div>
+      <pre style="margin-top:1.4rem"><code><span class="c"># pulls torch; training resolves cuda &rarr; mps &rarr; cpu</span>
+uv sync --extra serve &amp;&amp; uv run tensor-factory-studio</code></pre>
+      <p class="spec-note">Workflow and keymap: <a href="https://github.com/JimothyJohn/tensor-factory/tree/master/studio">studio/README.md &nearr;</a></p>
+    </div>
+  </section>
+
   <section id="pipeline">
     <div class="col sec-pad">
-      <p class="eyebrow">Fig. 02 — The pipeline</p>
+      <p class="eyebrow">Fig. 03 — The pipeline</p>
       <div class="steps">
         <div class="step"><div class="num">01</div><div><h3>Synthesize</h3><p>Generate images from a prompt — hosted Gemini, or a mock that runs anywhere.</p></div></div>
         <div class="step"><div class="num">02</div><div><h3>Auto-label</h3><p>GroundingDINO proposes boxes; a human gate approves them before they train.</p></div></div>
@@ -88,7 +102,7 @@
 
   <section id="docs">
     <div class="col sec-pad">
-      <p class="eyebrow">Fig. 03 — The documentation</p>
+      <p class="eyebrow">Fig. 04 — The documentation</p>
 
       <h3 class="docs-group">Guides — get it running</h3>
       <div class="pkg"><div class="name"><a href="getting-started.html">Getting started →</a></div><p class="desc">Clone, sync, and run the bundled int8 detector on CPU in under a minute. No GPU, no API keys.</p></div>
@@ -104,7 +118,7 @@
 
   <section id="example">
     <div class="col sec-pad">
-      <p class="eyebrow">Fig. 04 — Examples</p>
+      <p class="eyebrow">Fig. 05 — Examples</p>
       <div class="example">
         <span class="tag">Example 01</span>
         <h3>Helicoil detection</h3>
