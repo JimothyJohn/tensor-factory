@@ -17,7 +17,10 @@ import { chromium } from "playwright";
 const BASE = process.env.STUDIO_URL || "http://127.0.0.1:8089";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GOOD = path.join(HERE, "fixtures", "sample.webm");
-const GARBAGE = path.join(os.tmpdir(), "studio-e2e-garbage.mp4");
+// A private directory (mkdtemp: unpredictable name, mode 0700), not a fixed name in the
+// shared tmpdir that another local user could pre-create or swap for a symlink.
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "studio-e2e-"));
+const GARBAGE = path.join(TMP, "garbage.mp4");
 fs.writeFileSync(GARBAGE, Buffer.from("definitely not a video".repeat(40)));
 
 const steps = [];
@@ -121,5 +124,5 @@ try {
   process.exitCode = 1;
 } finally {
   await browser.close();
-  fs.rmSync(GARBAGE, { force: true });
+  fs.rmSync(TMP, { recursive: true, force: true });
 }

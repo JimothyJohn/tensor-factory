@@ -16,18 +16,26 @@ import struct
 import zlib
 from pathlib import Path
 
+from .errors import ImageError
+from .jpeg import decode_jpeg
 from .pb import FLOAT32
 from .tensor import Tensor
+
+__all__ = [
+    "ImageError",
+    "decode",
+    "decode_jpeg",
+    "decode_png",
+    "decode_ppm",
+    "preprocess",
+    "resize_rgb",
+]
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _MAX_DIM = 32768  # reject absurd headers before allocating anything
 _MAX_PIXELS = 1 << 26  # ~67 MP: bounds inflate/allocation from a hostile header
 
 _CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}  # PNG color type -> samples per pixel
-
-
-class ImageError(ValueError):
-    """Malformed or unsupported image data."""
 
 
 def _paeth(a: int, b: int, c: int) -> int:
@@ -193,8 +201,6 @@ def decode(data: bytes) -> tuple[int, int, bytes]:
     if data[:8] == _PNG_MAGIC:
         return decode_png(data)
     if data[:2] == b"\xff\xd8":
-        from .jpeg import decode_jpeg  # deferred: jpeg imports ImageError from here
-
         return decode_jpeg(data)
     if data[:2] == b"P6":
         return decode_ppm(data)
