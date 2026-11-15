@@ -156,7 +156,7 @@ uint8 (x1 y1 x2 y2): 54 85 201 201</pre>
 <pre>uv run tensor-factory-http --port 8088 &amp;
 
 curl http://127.0.0.1:8088/health                          <span class="c"># {"status": "ok"}</span>
-curl http://127.0.0.1:8088/model_info                      <span class="c"># model + ORT providers</span>
+curl http://127.0.0.1:8088/model_info                      <span class="c"># model + sha256, engine, providers</span>
 curl --data-binary @frame.png http://127.0.0.1:8088/detect <span class="c"># raw bytes -&gt; detection JSON</span></pre>
         <div class="note warn">
           <span class="tag">Not public by default</span>
