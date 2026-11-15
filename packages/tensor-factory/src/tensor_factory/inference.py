@@ -47,7 +47,11 @@ class Detector:
         input_size: int = 480,
         providers: Sequence[str] | None = None,
         engine: str = "auto",
+        model_bytes: bytes | None = None,
     ) -> None:
+        # ``model_bytes``, when given, is the model itself and ``model_path`` only names
+        # its format: a caller that already read (and hashed) the file loads exactly those
+        # bytes instead of racing a second read against a file being replaced.
         if engine not in ("auto", "ort", "zerort"):
             raise ValueError(f"engine must be 'auto', 'ort' or 'zerort', got {engine!r}")
         if str(model_path).endswith(".tfm"):
@@ -72,7 +76,7 @@ class Detector:
             else:
                 self._np = np
                 self._session = ort.InferenceSession(
-                    str(model_path),
+                    model_bytes if model_bytes is not None else str(model_path),
                     providers=list(providers) if providers else ["CPUExecutionProvider"],
                 )
                 self.engine = "ort"
@@ -81,7 +85,7 @@ class Detector:
         if self._session is None:
             from . import zerort
 
-            self._rt = zerort.Runtime(model_path)
+            self._rt = zerort.Runtime(model_bytes if model_bytes is not None else model_path)
             self.engine = "zerort"
             self.input_name = self._rt.input_names[0]
             self.output_names = list(self._rt.output_names)

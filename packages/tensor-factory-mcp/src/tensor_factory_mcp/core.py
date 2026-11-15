@@ -8,11 +8,20 @@ Zero-dependency serving: when PIL is not installed, image paths and bytes route 
 the stdlib decoder (PNG / binary PPM) and inference falls back to the pure-Python zerort
 engine -- a bare CPython can serve detections. Each result is built from a *single*
 forward pass (:meth:`Detector.detect_outputs`); on zerort an extra pass costs ~1.5 s.
+
+Hot reload: a cached detector is tied to its model file's identity (mtime + size). Replace
+the file and the next call loads the new model -- a running server takes a new model with
+no restart. If the replacement does not load (half-copied, corrupt), the model that was
+working keeps serving and :func:`model_info` reports why under ``reload_error``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
+import os
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +35,23 @@ DEFAULT_INPUT_SIZE = 480
 # the detection is "nothing here" -- no box at all, the YOLO-style no-object case.
 PRESENCE_THRESHOLD = 0.5
 
-_detectors: dict[tuple[str, int, str], Detector] = {}
+
+@dataclass
+class _Loaded:
+    """A live detector plus the identity of the file it was loaded from."""
+
+    detector: Detector
+    stamp: tuple[int, int]  # (mtime_ns, size) of the model file at load time
+    sha256: str
+    size: int
+    # Set when a newer file at the same path failed to load: its stamp (so it is not
+    # retried on every request) and the reason, surfaced through model_info.
+    failed_stamp: tuple[int, int] | None = None
+    reload_error: str | None = None
+
+
+_detectors: dict[tuple[str, int, str], _Loaded] = {}
+_lock = threading.Lock()
 
 
 def default_model_path() -> Path:
@@ -43,13 +68,50 @@ def resolve_model(model_path: str | None) -> str:
     return str(path)
 
 
-def _detector(model_path: str, input_size: int, engine: str = "auto") -> Detector:
+def _stamp(model_path: str) -> tuple[int, int]:
+    st = os.stat(model_path)
+    return st.st_mtime_ns, st.st_size
+
+
+def _load(model_path: str, input_size: int, engine: str) -> _Loaded:
+    # Read once and hand the engine the same bytes that were hashed, so the reported
+    # sha256 is exactly the model that is running even if the file changes mid-load.
+    stamp = _stamp(model_path)
+    data = Path(model_path).read_bytes()
+    detector = Detector(model_path, input_size=input_size, engine=engine, model_bytes=data)
+    return _Loaded(detector, stamp, hashlib.sha256(data).hexdigest(), len(data))
+
+
+def _loaded(model_path: str, input_size: int, engine: str = "auto") -> _Loaded:
     key = (model_path, input_size, engine)
-    if key not in _detectors:
-        if len(_detectors) >= 4:  # bounded like the old lru_cache(maxsize=4)
+    with _lock:
+        cached = _detectors.get(key)
+        try:
+            stamp = _stamp(model_path)
+        except OSError:
+            if cached is None:
+                raise
+            # The file vanished mid-replace (rm then cp): keep serving what is loaded.
+            cached.reload_error = "model file is missing; serving the last loaded model"
+            return cached
+        if cached is not None and stamp in (cached.stamp, cached.failed_stamp):
+            return cached
+        try:
+            fresh = _load(model_path, input_size, engine)
+        except Exception as exc:  # noqa: BLE001 -- any load failure keeps the old model
+            if cached is None:
+                raise
+            cached.failed_stamp = stamp
+            cached.reload_error = f"{type(exc).__name__}: {exc}"
+            return cached
+        if cached is None and len(_detectors) >= 4:  # bounded like the old lru_cache(4)
             _detectors.pop(next(iter(_detectors)))
-        _detectors[key] = Detector(model_path, input_size=input_size, engine=engine)
-    return _detectors[key]
+        _detectors[key] = fresh
+        return fresh
+
+
+def _detector(model_path: str, input_size: int, engine: str = "auto") -> Detector:
+    return _loaded(model_path, input_size, engine).detector
 
 
 def _box_fields(box: BBox, width: int, height: int) -> dict[str, Any]:
@@ -157,16 +219,28 @@ def model_info(
     input_size: int = DEFAULT_INPUT_SIZE,
     engine: str = "auto",
 ) -> dict[str, Any]:
-    """Report the resolved model path, input size, IO name, engine, and providers."""
+    """Report the resolved model path, input size, IO name, engine, and providers.
+
+    ``sha256`` and ``bytes`` identify the model that is actually loaded, so a deploy can
+    confirm a device is running exactly the file that was pushed. ``reload_error`` is
+    present only when a newer file at that path failed to load and the previous model is
+    still the one serving.
+    """
     resolved = resolve_model(model_path)
-    detector = _detector(resolved, input_size, engine)
-    return {
+    loaded = _loaded(resolved, input_size, engine)
+    detector = loaded.detector
+    info: dict[str, Any] = {
         "model": resolved,
+        "sha256": loaded.sha256,
+        "bytes": loaded.size,
         "input_size": input_size,
         "input_name": detector.input_name,
         "engine": detector.engine,
         "providers": list(detector.session.get_providers()) if detector.session else ["zerort"],
     }
+    if loaded.reload_error:
+        info["reload_error"] = loaded.reload_error
+    return info
 
 
 def benchmark(

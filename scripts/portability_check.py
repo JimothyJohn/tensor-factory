@@ -8,6 +8,8 @@ installed). Uses only the standard library and the in-repo sources:
 2. pack the model to .tfm and detect again -- identical outputs required
 3. detect on synthetic PPM bytes
 4. boot the stdlib HTTP endpoint and round-trip /detect over a real socket
+5. build the single-file edge bundle and serve a detection from it in a fresh
+   interpreter started with no site-packages at all (``-S -I``)
 
 If third-party packages happen to be importable (a dev venv), an import blocker is
 installed so the run still exercises the zero-dependency path; in the CI container
@@ -16,7 +18,12 @@ the environment is genuinely bare.
 
 import importlib.util
 import json
+import os
+import platform
+import re
+import subprocess
 import sys
+import tempfile
 import threading
 import urllib.request
 from pathlib import Path
@@ -94,7 +101,47 @@ def main() -> int:
     assert abs(served["score"] - result["score"]) < 1e-9, served
     print(f"4. HTTP /detect on :{port}: matches the in-process result")
 
-    print("portability check passed: image -> detection on the stdlib alone")
+    # 5. The edge bundle: one file, started the way a device would start it.
+    from tensor_factory_mcp import bundle
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pyz = Path(tmp) / "edge.pyz"
+        built = bundle.build(model, pyz)
+        proc = subprocess.Popen(
+            [sys.executable, "-S", "-I", "-u", str(pyz), "--port", "0"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env={"HOME": tmp, "PATH": os.defpath},
+            cwd=tmp,
+        )
+        try:
+            assert proc.stdout is not None
+            line = proc.stdout.readline()
+            found = re.search(r"http://127\.0\.0\.1:(\d+)", line)
+            assert found, f"bundle did not start: {line!r}"
+            base = f"http://127.0.0.1:{found.group(1)}"
+            with urllib.request.urlopen(f"{base}/model_info", timeout=60) as resp:
+                edge_info = json.loads(resp.read())
+            req = urllib.request.Request(f"{base}/detect", data=sample.read_bytes(), method="POST")
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                edge = json.loads(resp.read())
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+    assert edge_info["engine"] == "zerort", edge_info
+    assert edge_info["sha256"] == built["sha256"], edge_info
+    assert edge["present"] == result["present"], edge
+    assert abs(edge["score"] - result["score"]) < 1e-9, edge
+    print(
+        f"5. edge bundle ({built['bundle_bytes'] // 1024} KB, one file): "
+        "served the same detection from a bare interpreter"
+    )
+
+    print(
+        f"portability check passed on {platform.system()} {platform.machine()}: "
+        "image -> detection on the stdlib alone"
+    )
     return 0
 
 

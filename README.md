@@ -53,6 +53,19 @@ The loop is reactive end to end: label → retrain → better pre-fills → less
 Your attention goes only where the model is still uncertain; everything else is one
 keypress. Full workflow and keymap: [`studio/README.md`](studio/README.md).
 
+## To the edge in one file
+
+```bash
+uv run tensor-factory-bundle --model model.onnx --out edge.pyz
+scp edge.pyz device: && ssh device python3 edge.pyz --host 0.0.0.0
+curl --data-binary @frame.png http://device:8088/detect
+```
+
+`edge.pyz` holds the runtime, the HTTP server and the model (about 100 KB). The device
+needs only Python: it uses onnxruntime when present and the built-in pure-Python engine
+when not. Replace the model file on a running device and the next request uses it. Details:
+[`packages/tensor-factory-mcp`](packages/tensor-factory-mcp#edge-the-whole-deployment-is-one-file).
+
 ## Examples
 
 - [`examples/helicoils`](examples/helicoils) — detecting coiled-wire threaded inserts in
