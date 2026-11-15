@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch  # ty: ignore[unresolved-import]
+import torch  # ty: ignore[import-not-found]
 from PIL import Image
-from torch import nn  # ty: ignore[unresolved-import]
-from torch.utils.data import DataLoader, Dataset  # ty: ignore[unresolved-import]
+from torch import nn  # ty: ignore[import-not-found]
+from torch.utils.data import DataLoader, Dataset  # ty: ignore[import-not-found]
 
 from tensor_factory.review import review_summary
 
@@ -54,17 +54,17 @@ def _flip_box(
 
 
 class _BoxDataset(Dataset):
-    """Yields ``(image, box)`` for box-only training, ``(image, box, has_box)`` with
-    ``presence``, or ``(image, box, has_box, label)`` with ``multiclass``. Items are
-    ``(path, box | None)`` or ``(path, box | None, label_int)``. One dataset, all heads.
+    """Yields ``(image, box, has_box, label)`` for every item, whatever heads are training.
+    Items are ``(path, box | None)`` or ``(path, box | None, label_int)``. One dataset, all
+    heads, one tuple shape -- callers ignore the elements their mode doesn't use.
 
     A negative (no-object) item has ``box is None``: the image still trains the presence
     head toward *absent* (objectness target 0), but ``has_box == 0`` doubles as the mask
     that keeps it out of the box-regression *and* class-loss -- a no-object frame has no box
     to fit and no class to name. For a positive, ``has_box == 1`` is both those masks and the
-    objectness target, and ``label`` is its class id. ``augment`` adds random
-    horizontal/vertical flips (image and box transformed together; a box-less image just
-    flips the pixels -- the class label is flip-invariant).
+    objectness target, and ``label`` is its class id (0 when the item carries none).
+    ``augment`` adds random horizontal/vertical flips (image and box transformed together; a
+    box-less image just flips the pixels -- the class label is flip-invariant).
     """
 
     def __init__(
@@ -102,19 +102,15 @@ class _BoxDataset(Dataset):
                 if has_box:
                     coords = _flip_box(coords, horizontal=False)
         y = torch.tensor(coords, dtype=torch.float32)
-        if self.multiclass:
-            # has_box masks both box and class loss; label is the class id for positives
-            # (CrossEntropyLoss wants a long target), arbitrary-but-masked for negatives.
-            return (
-                x,
-                y,
-                torch.tensor(float(has_box), dtype=torch.float32),
-                torch.tensor(int(label), dtype=torch.long),
-            )
-        if self.presence:
-            # has_box is both the objectness target and the box-loss mask.
-            return x, y, torch.tensor(float(has_box), dtype=torch.float32)
-        return x, y
+        # One shape for every mode: has_box is the objectness target and the box/class-loss
+        # mask; label is the class id for positives (CrossEntropyLoss wants a long target),
+        # arbitrary-but-masked for negatives.
+        return (
+            x,
+            y,
+            torch.tensor(float(has_box), dtype=torch.float32),
+            torch.tensor(int(label), dtype=torch.long),
+        )
 
 
 def export_onnx(
@@ -336,8 +332,10 @@ def fit(
         total = 0.0
         for data in loader:
             optimizer.zero_grad()
+            # _BoxDataset always yields (image, box, has_box, label); the heads that are off
+            # ignore their element.
+            x, yb, m, labels = (d.to(dev) for d in data)
             if presence:
-                x, yb, m = (d.to(dev) for d in (data[0], data[1], data[2]))
                 raw = model(x)
                 out_t: dict[str, Any] = dict(zip(model.output_names, raw, strict=True))
                 pb = out_t["box"]
@@ -348,13 +346,10 @@ def fit(
                 loss = box_weight * box_term + presence_weight * presence_loss(
                     out_t["presence"].reshape(-1), m
                 )
-                if multiclass:
-                    # Class loss on positives only -- a negative has no class to name.
-                    labels = data[3].to(dev)
-                    if bool(mb.any()):
-                        loss = loss + class_weight * class_loss(out_t["logits"][mb], labels[mb])
+                # Class loss on positives only -- a negative has no class to name.
+                if multiclass and bool(mb.any()):
+                    loss = loss + class_weight * class_loss(out_t["logits"][mb], labels[mb])
             else:
-                x, yb = data[0].to(dev), data[1].to(dev)
                 loss = box_weight * box_loss(model(x), yb)
             loss.backward()
             optimizer.step()

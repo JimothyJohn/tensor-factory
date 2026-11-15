@@ -37,8 +37,8 @@ runtime reads each output by name.
 
 from __future__ import annotations
 
-import torch  # ty: ignore[unresolved-import]
-from torch import nn  # ty: ignore[unresolved-import]
+import torch  # ty: ignore[import-not-found]
+from torch import nn  # ty: ignore[import-not-found]
 
 
 def _block(in_ch: int, out_ch: int) -> nn.Module:

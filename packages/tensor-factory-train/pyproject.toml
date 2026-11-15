@@ -8,15 +8,15 @@ license = "Apache-2.0"
 dependencies = [
     "tensor-factory",
     "numpy>=1.24",
-    "pillow>=10",
-    "onnxruntime>=1.17",
+    "pillow>=12.3.0",
+    "onnxruntime>=1.28.0",
 ]
 
 [project.optional-dependencies]
 # torch is the only heavy bit. Pull for a training run with
 # `uv pip install torch` (or sync this extra) on a CUDA box or this Mac's MPS.
 train = [
-    "torch>=2.2",
+    "torch>=2.13.0",
 ]
 
 [project.scripts]

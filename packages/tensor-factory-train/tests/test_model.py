@@ -6,9 +6,10 @@ torch = pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
+from tensor_factory.geometry import BBox  # noqa: E402
 from tensor_factory.inference import Detector  # noqa: E402
 from tensor_factory_train.model import TinyDetector, soft_argmax_xyxy  # noqa: E402
-from tensor_factory_train.train import _flip_box, export_onnx, fit  # noqa: E402
+from tensor_factory_train.train import _BoxDataset, _flip_box, export_onnx, fit  # noqa: E402
 
 
 @pytest.mark.unit
@@ -86,6 +87,29 @@ def test_fit_refuses_all_pending_dataset(tmp_path):
     # The gate refuses to train -- and says why -- before touching any images.
     with pytest.raises(ValueError, match="pending human review"):
         fit(tmp_path, tmp_path / "m.onnx", epochs=1, size=64)
+
+
+@pytest.mark.unit
+def test_box_dataset_returns_consistent_tuple_shape(tmp_path):
+    """Regression for CodeQL py/mixed-tuple-returns (alert #3).
+
+    ``_BoxDataset.__getitem__`` used to return a 2-tuple ``(image, box)`` when
+    ``presence=False`` but a 3-tuple ``(image, box, has_box)`` when ``presence=True``.
+    Callers (``fit``'s training loop) had to branch on ``presence`` just to know how many
+    values to unpack. It must now return the same shape in every mode -- since the class
+    head landed that is ``(image, box, has_box, label)``, multiclass or not.
+    """
+    img_path = tmp_path / "a.png"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(img_path)
+    box = BBox.from_pixels(1, 1, 4, 4, width=8, height=8)
+    items = [(img_path, box), (img_path, None)]  # one positive, one negative
+
+    for presence, multiclass in ((False, False), (True, False), (True, True)):
+        ds = _BoxDataset(items, size=8, presence=presence, multiclass=multiclass)
+        shapes = {len(ds[i]) for i in range(len(ds))}
+        assert shapes == {4}, (
+            f"presence={presence} multiclass={multiclass}: expected uniform 4-tuples, got {shapes}"
+        )
 
 
 @pytest.mark.unit

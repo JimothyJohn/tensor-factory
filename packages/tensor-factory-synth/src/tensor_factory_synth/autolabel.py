@@ -31,7 +31,8 @@ class Detection:
 
 
 class AutoLabeler(Protocol):
-    def label(self, image: Image.Image, features: Sequence[str]) -> list[Detection]: ...
+    def label(self, image: Image.Image, features: Sequence[str]) -> list[Detection]:
+        pass
 
 
 class GroundingDinoAutoLabeler:
@@ -50,8 +51,8 @@ class GroundingDinoAutoLabeler:
         text_threshold: float = 0.25,
     ) -> None:
         try:
-            import torch  # ty: ignore[unresolved-import]
-            from transformers import (  # ty: ignore[unresolved-import]
+            import torch  # ty: ignore[import-not-found]
+            from transformers import (  # ty: ignore[import-not-found]
                 AutoModelForZeroShotObjectDetection,
                 AutoProcessor,
             )

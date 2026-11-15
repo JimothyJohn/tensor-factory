@@ -10,22 +10,22 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__, core
 
-mcp = FastMCP("tensor_factory_mcp")
+mcp = MCPServer("tensor_factory_mcp")
 
 
 def _read_only(title: str) -> ToolAnnotations:
     return ToolAnnotations(
         title=title,
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
     )
 
 

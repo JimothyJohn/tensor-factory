@@ -31,7 +31,9 @@ _NP_DTYPE = {
 def _run_both(nodes, inputs, outputs, feeds, initializers=()):
     """Build a model from nodes, run ort and zerort on identical feeds, return both."""
     graph = helper.make_graph(list(nodes), "t", list(inputs), list(outputs), list(initializers))
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    # Pin the IR version opset 17 shipped with: onnx stamps its own newest IR by default,
+    # which a locked onnxruntime one release behind refuses to load.
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
     onnx.checker.check_model(model)
     blob = model.SerializeToString()
 
@@ -236,7 +238,9 @@ def test_unsupported_op_raises_loudly(tmp_path):
         ],
         [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 1, 1, 2])],
     )
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    # Pin the IR version opset 17 shipped with: onnx stamps its own newest IR by default,
+    # which a locked onnxruntime one release behind refuses to load.
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
     from tensor_factory.zerort import UnsupportedOp
 
     with pytest.raises(UnsupportedOp, match="LSTM"):
