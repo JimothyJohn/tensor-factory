@@ -15,6 +15,15 @@ tensor-factory-train fit --data data/ --out model.onnx --epochs 30 --device mps
 tensor-factory-train fit --data data/ --out model.onnx --device mps \
   --negatives negatives_pool/ --allow-unreviewed
 
+# train on several datasets at once. They are read in place (no merge-and-copy), classes
+# are merged by name, part of *each* is held out, and each is scored on its own:
+tensor-factory-train fit --data real/ real_ds/ synthetic/ --negatives real_neg/ \
+  --val-frac 0.2 --out model.onnx
+#   by source (best checkpoint):
+#     real: 105 train / 26 val  err 48.2px  presence 100%
+#     real_ds: 88 train / 22 val  err 33.9px  presence 59%
+#     ...
+
 # then run it on CPU via the core inference harness:
 tensor-factory bench --model model.onnx
 tensor-factory detect --model model.onnx --image some_frame.png
@@ -27,7 +36,8 @@ matching `tensor_factory.inference`'s contract. With `--presence`/`--negatives` 
 mean+max pooled **objectness logit** rides alongside (`forward` returns `(box, presence)`);
 its sigmoid is P(target present), so the runtime returns one box when it clears a threshold
 and none when it doesn't — no class label, no `background` class. Device resolves
-`cuda → mps → cpu`; ONNX export runs on CPU.
+`cuda → mps → cpu` (`--device`, or `TENSOR_FACTORY_DEVICE=cpu` to pin a whole machine); ONNX
+export runs on CPU.
 
 **Validation gate.** Only human-`approved` annotations train by default (see
 [`tensor_factory.review`](../tensor-factory/src/tensor_factory/review.py)); a dataset of

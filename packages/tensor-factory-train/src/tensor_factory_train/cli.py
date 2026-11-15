@@ -37,7 +37,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     f = sub.add_parser("fit", help="train on a COCO dataset, export int8 ONNX")
-    f.add_argument("--data", required=True, help="dataset dir (annotations.coco.json + images/)")
+    f.add_argument(
+        "--data",
+        required=True,
+        nargs="+",
+        help="dataset dir(s), each with annotations.coco.json + images/; several train as "
+        "one set, read in place, and are scored separately",
+    )
     f.add_argument("--out", default="model.onnx", help="output ONNX path")
     f.add_argument("--epochs", type=int, default=10)
     f.add_argument("--batch", type=int, default=16)

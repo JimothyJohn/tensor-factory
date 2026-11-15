@@ -197,3 +197,72 @@ def test_trainer_idles_without_new_labels(tmp_path):
     time.sleep(4)
     tr.stop()
     assert tr.version == 1, f"trainer retrained without new labels (version={tr.version})"
+
+
+def _wait_for_model(tr: Trainer, timeout: float = 120.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        m = tr.metrics()
+        if m["hasModel"] and m.get("phase") == "idle":
+            return m
+        time.sleep(0.2)
+    raise AssertionError(f"no served model within {timeout}s: {tr.metrics()}")
+
+
+@pytest.mark.integration
+def test_extra_source_trains_a_model_before_any_browser_label(tmp_path):
+    # An earlier session's dataset on disk is enough to get a first model: nothing has
+    # been labeled in this one, and the round still runs and reports that source.
+    prior = Dataset(tmp_path / "prior")
+    for i in range(8):
+        png, box = _positive(i)
+        prior.upsert(i, True, box, png)
+
+    ds = Dataset(tmp_path / "data")
+    tr = Trainer(
+        ds, tmp_path / "data" / "models", size=96, width=8, epochs=2, batch=4,
+        device="cpu", sources=[prior.root],
+    )  # fmt: skip
+    tr.start()
+    try:
+        m = _wait_for_model(tr)
+    finally:
+        tr.stop()
+        tr.join(timeout=30)
+    names = [s["name"] for s in m["sources"]]
+    assert names == ["prior", "negatives"]
+    assert m["sources"][0]["train"] + m["sources"][0]["val"] == 8
+
+
+@pytest.mark.integration
+def test_browser_labels_and_an_extra_source_are_scored_separately(tmp_path):
+    prior = Dataset(tmp_path / "prior")
+    for i in range(8):
+        png, box = _positive(i)
+        prior.upsert(i, True, box, png)
+
+    ds = Dataset(tmp_path / "data")
+    for i in range(6):
+        png, box = _positive(50 + i)
+        ds.upsert(i, True, box, png)
+    for i in range(4):
+        ds.upsert(100 + i, False, None, _negative(i))
+
+    tr = Trainer(
+        ds, tmp_path / "data" / "models", size=96, width=8, epochs=2, batch=4,
+        device="cpu", sources=[prior.root],
+    )  # fmt: skip
+    tr.start()
+    try:
+        m = _wait_for_model(tr)
+    finally:
+        tr.stop()
+        tr.join(timeout=30)
+    by_name = {s["name"]: s for s in m["sources"]}
+    assert list(by_name) == ["data", "prior", "negatives"]
+    assert by_name["data"]["train"] + by_name["data"]["val"] == 6
+    assert by_name["prior"]["train"] + by_name["prior"]["val"] == 8
+    assert by_name["negatives"]["train"] + by_name["negatives"]["val"] == 4
+    # each labeled source has a held-out error of its own; the negatives pool has none
+    assert by_name["data"]["err"] is not None and by_name["prior"]["err"] is not None
+    assert by_name["negatives"]["err"] is None

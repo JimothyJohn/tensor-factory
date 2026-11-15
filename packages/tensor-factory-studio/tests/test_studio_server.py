@@ -297,3 +297,16 @@ def test_autolabel_endpoint_returns_detection(server, monkeypatch):
     code, body = _post(base, "/autolabel?prompt=helicoil&box=0.4,0.4,0.6,0.6", _png())
     assert code == 200
     assert body["present"] is True and body["label"] == "helicoil" and body["primed"] is True
+
+
+@pytest.mark.unit
+def test_serve_rejects_a_source_that_is_not_a_dataset(tmp_path, capsys):
+    # A typo in --source must fail at launch with the path named, before any port is
+    # bound -- not as a train error in the browser minutes later.
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("x", encoding="utf-8")
+    missing = tmp_path / "not-a-dataset"
+    rc = serve("127.0.0.1", 0, data_dir=tmp_path / "data", ui_dir=ui, sources=[missing])
+    assert rc == 2
+    assert str(missing) in capsys.readouterr().out

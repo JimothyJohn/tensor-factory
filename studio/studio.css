@@ -426,6 +426,38 @@ main > * {
 .metric b.loses {
   color: var(--warn);
 }
+.sources {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sources th {
+  color: var(--muted);
+  font-weight: 400;
+  text-align: right;
+  padding: 2px 0 2px 8px;
+}
+.sources td {
+  text-align: right;
+  padding: 2px 0 2px 8px;
+  border-top: 1px dotted var(--line);
+}
+.sources th:first-child,
+.sources td:first-child {
+  text-align: left;
+  padding-left: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sources td.beats {
+  color: var(--accent);
+}
+.sources td.loses {
+  color: var(--warn);
+}
 .guardrail {
   font-size: 12px;
   min-height: 0;

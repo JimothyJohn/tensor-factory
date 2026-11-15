@@ -38,7 +38,9 @@ Options:
   -s, --studio      Serve Tensor Factory Studio (labeling UI + continuous trainer)
                     on http://127.0.0.1:8089. Syncs the 'serve' extra (torch) and
                     opens the browser-driven labeling loop. Extra args pass through,
-                    e.g. './Quickstart -s --port 9000 --size 96'.
+                    e.g. './Quickstart -s --port 9000 --size 96'. Add
+                    '--source DIR' (repeatable) to train existing datasets alongside
+                    the frames you label; each is scored separately in the trainer panel.
 
 With no options, bootstraps the workspace (uv sync) and starts the tensor-factory
 MCP server with standard settings (bundled demo model, stdio) so you can try the
