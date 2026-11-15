@@ -9,6 +9,7 @@ import { installKeymap, renderKeymapHelp } from "./keymap.js";
 import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
 import { Trainer } from "./trainer.js";
+import { sourceRows } from "./sources.js";
 import { toast } from "./toast.js";
 
 const PALETTE = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa"];
@@ -492,8 +493,29 @@ function renderMetrics(m) {
   $("mPresence").textContent = m.presenceAcc == null ? "—" : `${(m.presenceAcc * 100).toFixed(0)}%`;
   $("mGain").textContent = m.gain == null ? "—" : m.gain.toFixed(2);
   $("mEpoch").textContent = `${m.epoch} · ${m.trainCount}t/${m.valCount}v`;
+  renderSources(m.sources, m.baseline);
   renderGuardrail(m);
   drawSparkline(m.history, m.bestErr, m.baseline);
+}
+
+// One row per data source, so a source the model is bad on is visible instead of
+// averaged into the headline number. Hidden until there is more than one to compare.
+function renderSources(sources, baseline) {
+  const table = $("sources");
+  const rows = sourceRows(sources, baseline);
+  table.hidden = rows.length < 2;
+  table.tBodies[0].replaceChildren(
+    ...rows.map((r) => {
+      const tr = document.createElement("tr");
+      for (const text of r.cells) {
+        const td = document.createElement("td");
+        td.textContent = text; // source names come from directory names: text, never HTML
+        tr.appendChild(td);
+      }
+      if (r.tone) tr.cells[3].className = r.tone;
+      return tr;
+    }),
+  );
 }
 
 function renderGuardrail(m) {

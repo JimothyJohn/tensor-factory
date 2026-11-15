@@ -52,6 +52,33 @@ jobs:
       - name: Unit tests (Studio JS)
         run: node --test studio/tests/*.test.mjs
 
+  # The gate job has no torch, so every training test is skipped there. This job installs
+  # it and runs the training + Studio suites for real (tiny models, CPU, well under a
+  # minute of test time). macOS because the arm64 torch wheel is ~130 MB; the Linux one
+  # drags in the CUDA stack.
+  train:
+    runs-on: macos-latest
+    env:
+      # A hosted runner's virtualized GPU can report MPS available and then fail to
+      # allocate; these are tiny models, so pin the CPU and keep the job deterministic.
+      TENSOR_FACTORY_DEVICE: cpu
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync with torch (locked)
+        run: uv sync --locked --all-packages --extra train --extra serve
+
+      - name: Training + Studio tests
+        run: >-
+          uv run --all-packages --extra train --extra serve python -m pytest
+          packages/tensor-factory-train packages/tensor-factory-studio
+          -m "unit or integration"
+
   # The Doom test: the pipeline must run on a bare CPython with no wheels installed.
   # The unit suite proves this with an import blocker; this job proves it with an
   # actually-empty environment -- no uv, no venv, no pip install of any kind.

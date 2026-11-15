@@ -61,6 +61,15 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   real negatives — trains the bundled `cam-v1`), `real_ds` (110 human-validated synthetic
   positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-labeled),
   `negatives_pool` (110 synthetic negatives), `real_ds_combined` (278, used to train v3).
+- **Several data sources train as one set.** `tensor-factory-train fit --data A B C` (and
+  `fit([A, B, C], ...)`) reads each dataset dir in place, merges classes by name, holds
+  `--val-frac` out of *each* source and reports each separately; negatives dirs count as
+  sources. The Studio takes `--source DIR` (repeatable) to train prior datasets alongside
+  the frames labeled in the browser — with a source given it trains a first model before
+  anything is labeled — and its trainer panel shows the per-source table every epoch.
+- **Training tests need torch, which the `gate` job does not install.** The `train` CI job
+  (macOS runner, `--extra train --extra serve`) runs them; locally:
+  `uv run --all-packages --extra train --extra serve python -m pytest packages/tensor-factory-train packages/tensor-factory-studio -m "unit or integration"`.
 - **Human-review gate is optional.** Training enforces `review=approved` by default, but
   `--allow-unreviewed` trains straight on GroundingDINO labels — the fast path (QC a
   contact-sheet instead of hand-correcting every box). The prompt system + QC samples are
