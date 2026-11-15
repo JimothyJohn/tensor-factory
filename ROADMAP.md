@@ -36,7 +36,7 @@ wire-quantization step of the detection contract.
 | protobuf/onnx (model loading) | inference | **eliminated** — `zerort.pb` reads the wire format |
 | PIL (image decode) | inference | **optional** — stdlib PNG, baseline JPEG, and PPM decoders (progressive JPEG still needs PIL) |
 | torch | training | required, **stays** — see non-goals |
-| GroundingDINO | auto-labeling | scheduled exit: model-in-the-loop labeling (`TODO.md` "Now") |
+| GroundingDINO | auto-labeling | scheduled exit: model-in-the-loop labeling (`TODO.md` "Model quality") |
 | Gemini API | image generation | inherently hosted — mitigate with dataset durability, not reimplementation |
 | onnxruntime-web | docs demo | acceptable — browser WASM is the platform there |
 
