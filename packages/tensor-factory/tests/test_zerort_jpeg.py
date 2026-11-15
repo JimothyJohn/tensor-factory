@@ -106,6 +106,7 @@ def test_jpeg_restart_markers():
         blob = _jpeg_bytes(img, quality=85, subsampling=0, restart_marker_blocks=2)
     except TypeError:
         pytest.skip("this Pillow cannot emit restart markers")
+        return  # skip() raises; the return tells static analysis blob is bound below
     assert b"\xff\xdd" in blob  # DRI segment actually present
     w, h, rgb = decode_jpeg(blob)
     ref = PIL_Image.open(io.BytesIO(blob)).convert("RGB").tobytes()

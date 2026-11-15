@@ -18,7 +18,7 @@ import math
 import struct
 from operator import mul
 
-from .imageio import ImageError
+from .errors import ImageError
 
 _MAX_DIM = 32768
 _MAX_PIXELS = 1 << 26
@@ -289,7 +289,6 @@ def decode_jpeg(data: bytes) -> tuple[int, int, bytes]:
         elif marker == 0xD9:  # EOI before SOS
             raise ImageError("no image data (EOI before SOS)")
         # else: APPn/COM/DNL etc. -- skipped
-    raise AssertionError("unreachable")
 
 
 def _decode_scan(

@@ -62,6 +62,9 @@ jobs:
       # A hosted runner's virtualized GPU can report MPS available and then fail to
       # allocate; these are tiny models, so pin the CPU and keep the job deterministic.
       TENSOR_FACTORY_DEVICE: cpu
+      # The runner's default python3 is whatever Homebrew shipped last, which can be newer
+      # than the wheels in the lockfile (3.15 had no onnxruntime wheel). Pin one that does.
+      UV_PYTHON: "3.13"
     steps:
       - uses: actions/checkout@v7
 
