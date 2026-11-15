@@ -143,7 +143,7 @@ def test_detector_cache_stays_bounded(tmp_path):
 @pytest.mark.unit
 def test_reload_under_concurrent_requests_never_errors(model, image):
     # Requests racing a swap must each get an answer from one model or the other.
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
     stop = threading.Event()
 
     def hammer() -> None:
@@ -151,7 +151,7 @@ def test_reload_under_concurrent_requests_never_errors(model, image):
             try:
                 out = core.detect(image, str(model))
                 assert out["image_size"] == {"width": 64, "height": 64}
-            except BaseException as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 -- AssertionError included
                 errors.append(exc)
                 return
 
