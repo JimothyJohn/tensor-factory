@@ -3,15 +3,129 @@
 Open work for the tensor-factory pipeline (helicoils example). Roughly priority-ordered.
 See [`CLAUDE.md`](CLAUDE.md) for current standing.
 
+## Open questions for Nick
+
+- [ ] **Promote dev to master?** GitHub Pages serves the site from `master`, and `master` is
+  88 commits behind `dev` (checked 2026-11-15). Everything landed this session (zero-dependency
+  inference, the Studio, multi-source training, the one-file edge bundle) is on `dev` only,
+  so none of it is on the public site or the release line. Separately, the local `master` in
+  the main checkout has 9 commits that were never pushed (the WATTAGE.md / margin.html
+  economics study) and has diverged from `origin/master` by 8, so a plain push will be
+  rejected until those are reconciled.
+      options: merge dev into master now — the site and release line catch up; you reconcile the 9 local commits first | wait — master stays on the June/July state
+      recommend: merge dev into master now — four months of work is invisible to anyone reading the site
+      stakes: high
+      result: the public site and `master` match what is tested on `dev`
+      id: promote-dev-to-master
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **What should "cloud" be for this project?** The pipeline now runs data → training →
+  one-file edge bundle, all on this Mac. Nothing is in AWS yet. The three candidates do
+  different jobs and cost different amounts, so this is a direction call.
+      options: S3 store for datasets and models — datasets stop living on one disk; the edge pulls a model by its sha256; a few cents a month | GPU training runs on EC2 — a script launches a g5/g6 spot instance, trains, uploads the model, shuts down; about $0.30–1.00 per run | hosted inference endpoint — a Lambda that serves /detect; pay per request, needs a public-access decision | nothing yet — stay local
+      recommend: S3 store for datasets and models — every dataset is gitignored on a single machine today, which is the one unrecoverable loss in the pipeline, and a model store is what the edge and any later training job both need first
+      stakes: high
+      result: a concrete cloud piece gets built instead of guessed
+      id: cloud-direction
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Which board is the edge target, and may I deploy to it?** The one-file bundle
+  (`edge.pyz`) is proven on aarch64 Linux in CI but has never run on a physical board.
+  Deploying means copying one file and starting a user-level systemd service on that host.
+      options: name a host — I copy the bundle, start the service, and report frames per second and the model sha256 from the device | none yet — the CI proof stands until a board is chosen
+      recommend: name a host — real throughput on the real board is the number the whole "tiny CNN on CPU" claim rests on
+      stakes: low
+      needs: the hostname or address of a Pi-class board on the LAN, and whether anything else is running on it
+      result: measured fps and a running detector on the target hardware
+      id: edge-target-host
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Which landing page wins: the restyled page or the single-file detection app?**
+  `docs/index.html` on `dev` is the restyled landing page. The local branch `feat/index-app`
+  (worktree `../tensor-factory-index-app`, never pushed) replaces the same file with a
+  self-contained in-browser detection app (2.4 MB, live camera, YOLOX-Nano). They cannot
+  both be `index.html`.
+      options: restyled page stays, app moves to docs/app.html — both ship, no conflict | app becomes index.html — the demo is the front door; the restyled copy is dropped | drop the app — delete the branch and worktree
+      recommend: restyled page stays, app moves to docs/app.html — keeps both pieces of work and turns a merge conflict into a new file
+      stakes: low
+      result: `feat/index-app` lands or is deleted instead of sitting unpushed
+      id: landing-page-choice
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Dismiss the two remaining code-scanning alerts as false positives?** Five of the
+  seven alerts raised when the new code was first scanned are fixed. Two remain where no code
+  change is right. Alert 11 (`studio/js/video.js`) flags `video.src = URL.createObjectURL(file)`
+  as cross-site scripting; the value is a `blob:` address the browser creates from a file,
+  never markup. Alert 6 (`zerort/imageio.py`) flags reading an image from a caller-supplied
+  path; that is what the command-line tool and the local MCP tool are for, and the HTTP
+  endpoint takes bytes, not a path.
+      options: dismiss both — the security tab goes clean; reversible | leave open — they stay as a standing reminder | restrict paths in code — the MCP tool would only read under an allowed directory
+      recommend: dismiss both — neither is reachable by anyone who could not already read the file themselves
+      stakes: low
+      id: codeql-false-positives
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Protect master and turn on private vulnerability reporting?** Both were on the
+  original launch list and neither is set (checked 2026-11-15): `master` has no branch
+  protection, and private vulnerability reporting is off although `SECURITY.md` tells
+  reporters to use it. These are repository settings on your release branch, so I left them.
+      options: enable both — master requires the `gate` check; reporters get the private channel SECURITY.md promises | leave as is
+      recommend: enable both — SECURITY.md currently points at a channel that does not exist
+      stakes: low
+      id: master-protection-and-pvr
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Keep `dev` as the GitHub default branch?** GitHub's default branch is `dev`, while
+  `CLAUDE.md` says the default is `master`. Dependabot and CodeQL read their configuration
+  from the default branch, so today they work because the config lives on `dev`.
+      options: keep dev as default, fix the docs — nothing changes in behavior | make master the default — Dependabot and CodeQL config must be promoted to master first or they go quiet
+      recommend: keep dev as default, fix the docs — it is the arrangement that is already working
+      stakes: low
+      id: default-branch
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Keep or drop `wip/recovered-docs-site-20260623`?** A snapshot branch another session
+  made on 2026-06-23 of an orphaned docs-site edit; 4 commits that are not on `dev`. The docs
+  site has since been consolidated and restyled twice.
+      options: drop — delete the branch | keep — I open a PR so you can read the 4 commits against the current site
+      recommend: drop — the pages it touched have been rewritten since
+      stakes: low
+      id: recovered-docs-site
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
+- [ ] **Keep or drop `wip/recovered-margin-economics-20260702`?** A second snapshot of the
+  WATTAGE.md / margin.html economics study. The same work is in your unpushed local `master`
+  (see the first card), so this copy is a duplicate. The worktree
+  `../tensor-factory-wattage-notes-20260702` and its branch are the same story.
+      options: drop all three — delete the duplicate branch, the wattage-notes branch and its worktree, once master is pushed | keep until master is pushed
+      recommend: keep until master is pushed — they are the only other copy of that work until then
+      stakes: low
+      depends: promote-dev-to-master
+      id: recovered-margin-economics
+      asked: 2026-11-15
+      by: fable-2026-11-15
+
 ## Now
 
-- [ ] **First public push to GitHub.** The tree is push-ready; remaining mechanical steps:
-  - [ ] `git remote add origin git@github.com:JimothyJohn/tensor-factory.git` and push `master`.
-  - [ ] Decide the fate of `.claude/` (the docs-drift hook + skills): commit as shared project
-    tooling, or leave local. `.claude/settings.local.json` is already gitignored.
-  - [ ] Turn on branch protection for `master` (require the CI gate) once CI has run once.
-  - [ ] Enable GitHub Pages from `docs/` so the landing page + live demo are hosted.
-  - [ ] Enable private vulnerability reporting (Settings → Security) per `SECURITY.md`.
+- [x] **First public push to GitHub.** The repo is public with `dev` protected by the `gate`
+  check, `.claude/` is tracked as shared tooling, and GitHub Pages serves `docs/` from
+  `master`. The two settings still missing (master protection, private vulnerability
+  reporting) are a question card above.
+- [ ] **Run the edge bundle on a real board.** Copy `edge.pyz` to the target, start it as a
+  user systemd service, record frames per second with and without onnxruntime, and confirm
+  `/model_info` reports the sha256 the build printed.
+      depends: edge-target-host
+      est: 1h
+      difficulty: low
+      id: edge-on-real-board
 - [ ] **Model-in-the-loop pre-annotation (gated on v4 beating GroundingDINO).** Once the
   detector's boxes are tighter than the raw GroundingDINO auto-labels (measured against the
   human-approved subset as ground truth), close the loop: use the model itself to condition
