@@ -15,6 +15,8 @@ Routes:
   ``GET  /deploy``           -> state of the current / last deploy (polled by the UI)
   ``POST /deploy?port=``     -> quantize the served model and write it to the P4 on that port
   ``POST /model``            -> body = int8 ONNX trained in the browser; becomes the served model
+  ``POST /calib?i=``         -> body = one labeled frame from the browser (i = 0..63), kept to
+                                calibrate the P4 quantizer and to try on the board
   ``GET  /classes``          -> the ordered class list
   ``POST /samples?id&present&box&cls``  -> body = raw PNG; add/replace a labeled frame
   ``POST /classes``          -> body = {"classes": [...]}; set the ordered class list
@@ -102,10 +104,21 @@ def _desktop_box(model_path: Path, jpeg: bytes, input_size: int) -> list[float] 
     return [b.x1, b.y1, b.x2, b.y2]
 
 
+CALIB_FRAMES = 64  # frames a browser-trained model may bring along
+
+
+def _browser_frames(trainer: Trainer) -> Path:
+    """Where frames sent with a browser-trained model are kept (``POST /calib``)."""
+    return trainer.models_dir / "browser-frames"
+
+
 def _calib_dir(dataset: Dataset, trainer: Trainer) -> Path | None:
-    """Training images to calibrate the P4 quantizer with: the browser's, else a source's."""
-    for root in (dataset.root, *trainer.sources):
-        images = Path(root) / "images"
+    """Training images to calibrate the P4 quantizer with: the backend's own dataset, else
+    a source's, else the frames a browser-trained model brought along."""
+    for images in (
+        *(Path(root) / "images" for root in (dataset.root, *trainer.sources)),
+        _browser_frames(trainer),
+    ):
         if images.is_dir() and any(images.iterdir()):
             return images
     return None
@@ -124,7 +137,8 @@ def _probe_frame(dataset: Dataset, trainer: Trainer) -> bytes | None:
             for path in sorted(images.iterdir()):
                 if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
                     return path.read_bytes()
-    return None
+    first = _browser_frames(trainer) / "frame_00.png"
+    return first.read_bytes() if first.is_file() else None
 
 
 def make_deployer(dataset: Dataset, trainer: Trainer, input_size: int) -> Deployer:
@@ -325,6 +339,38 @@ def _make_handler(
                 return
             self._json(200, {"ok": True, "bytes": len(body)})
 
+        def _post_calib(self) -> None:
+            # Frames never leave the browser when it trains; these few do, on request, so
+            # the P4 quantizer sees real images instead of noise and the board has one
+            # frame to be checked on. Re-encoded here: what is stored is an image we wrote.
+            try:
+                i = int(parse_qs(urlsplit(self.path).query).get("i", [""])[0])
+            except ValueError:
+                i = -1
+            if not 0 <= i < CALIB_FRAMES:
+                self._json(400, {"error": f"i must be 0..{CALIB_FRAMES - 1}"})
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            import io
+
+            from PIL import Image
+
+            frames = _browser_frames(trainer)
+            try:
+                with Image.open(io.BytesIO(body)) as im:
+                    rgb = im.convert("RGB")
+            except Exception as exc:  # noqa: BLE001 -- not an image -> 400
+                self._json(400, {"error": f"not an image: {type(exc).__name__}"})
+                return
+            frames.mkdir(parents=True, exist_ok=True)
+            if i == 0:  # a new set: drop the previous model's frames
+                for old in frames.glob("frame_*.png"):
+                    old.unlink(missing_ok=True)
+            rgb.save(frames / f"frame_{i:02d}.png")
+            self._json(200, {"ok": True})
+
         def _post_deploy(self) -> None:
             port = parse_qs(urlsplit(self.path).query).get("port", [""])[0]
             # Only a port this machine actually lists: the value reaches a subprocess argv.
@@ -359,6 +405,8 @@ def _make_handler(
                 self._post_deploy()
             elif route == "/model":
                 self._post_model()
+            elif route == "/calib":
+                self._post_calib()
             elif route == "/reset":
                 dataset.clear()
                 trainer.reset()

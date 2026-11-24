@@ -10,7 +10,7 @@ import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
 import { connect } from "./engine.js";
 import { sourceRows } from "./sources.js";
-import { deployLine, Device, DOWNLOADS, howToUse, portOptions } from "./device.js";
+import { CALIB_FRAMES, deployLine, Device, DOWNLOADS, howToUse, portOptions } from "./device.js";
 import { configLine, verdict } from "./verdict.js";
 import { toast } from "./toast.js";
 
@@ -573,8 +573,22 @@ async function shareModelWithBackend() {
     toast.info("No trained model yet — label a few frames first.");
     return false;
   }
-  await device.uploadModel(bytes);
+  await device.uploadModel(bytes, calibrationFrames());
   return true;
+}
+
+// Labeled frames to send with the model: newest boxed frame first (it is the one tried on
+// the board), then a spread of the rest.
+function calibrationFrames() {
+  const boxed = state.frames.filter((f) => {
+    const l = state.labels.get(f.id);
+    return l && l.review === "approved" && l.present && l.boxes.length;
+  });
+  if (!boxed.length) return [];
+  const newest = boxed[boxed.length - 1];
+  const rest = boxed.slice(0, -1);
+  const step = Math.max(1, Math.floor(rest.length / (CALIB_FRAMES - 1)));
+  return [newest, ...rest.filter((_, i) => i % step === 0)].slice(0, CALIB_FRAMES).map((f) => f.blob);
 }
 
 async function modelFile(format) {

@@ -456,6 +456,50 @@ def test_an_empty_or_oversized_model_upload_is_refused(server):
 
 
 @pytest.mark.unit
+def test_frames_sent_with_a_browser_model_calibrate_and_probe(server):
+    from tensor_factory_studio.server import _browser_frames, _calib_dir, _probe_frame
+
+    base, tr = server
+    ds = Dataset(tr.models_dir.parent)
+    assert _calib_dir(ds, tr) is None and _probe_frame(ds, tr) is None
+    for i in range(3):
+        assert _post_bytes(base, f"/calib?i={i}", _png((40 + i, 30)))[0] == 200
+    frames = _browser_frames(tr)
+    assert sorted(p.name for p in frames.iterdir()) == [
+        "frame_00.png",
+        "frame_01.png",
+        "frame_02.png",
+    ]
+    assert _calib_dir(ds, tr) == frames
+    with Image.open(io.BytesIO(_probe_frame(ds, tr))) as im:
+        assert im.size == (40, 30)
+    # a new set starts at 0 and drops the old one
+    assert _post_bytes(base, "/calib?i=0", _png((8, 8)))[0] == 200
+    assert [p.name for p in frames.iterdir()] == ["frame_00.png"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("i", ["", "-1", "64", "1e3", "../../x", "0/../../etc", "%00"])
+def test_calibration_frame_index_is_bounded(server, i):
+    from tensor_factory_studio.server import _browser_frames
+
+    base, tr = server
+    code, _ = _post_bytes(base, f"/calib?i={urllib.parse.quote(i, safe='')}", _png())
+    assert code == 400
+    assert not _browser_frames(tr).exists()
+
+
+@pytest.mark.unit
+def test_a_calibration_frame_must_be_an_image(server):
+    from tensor_factory_studio.server import _browser_frames
+
+    base, tr = server
+    code, payload = _post_bytes(base, "/calib?i=0", b"<svg onload=alert(1)>")
+    assert code == 400 and "not an image" in payload["error"]
+    assert not _browser_frames(tr).exists()
+
+
+@pytest.mark.unit
 def test_status_says_whether_the_backend_holds_source_data(server):
     base, tr = server
     assert json.loads(_status(base, "/status")[1])["sources"] == 0
