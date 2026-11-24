@@ -1,0 +1,14 @@
+BENCH_START internal_free=389539 psram_free=29642848
+BENCH {"model":"w16_96","max_internal":0,"test":true,"single_ms":3.50,"dual_ms":2.17,"internal_bytes":9552,"psram_bytes":69528}
+BENCH {"model":"w16_96","max_internal":307200,"test":true,"single_ms":3.49,"dual_ms":2.15,"internal_bytes":311864,"psram_bytes":5012}
+BENCH {"model":"w16_128","max_internal":0,"test":true,"single_ms":6.12,"dual_ms":3.65,"internal_bytes":4388,"psram_bytes":119432}
+BENCH {"model":"w16_128","max_internal":307200,"test":true,"single_ms":6.08,"dual_ms":3.63,"internal_bytes":311600,"psram_bytes":4740}
+BENCH {"model":"w16_160","max_internal":0,"test":true,"single_ms":9.68,"dual_ms":5.69,"internal_bytes":4388,"psram_bytes":183944}
+BENCH {"model":"w16_160","max_internal":307200,"test":true,"single_ms":9.40,"dual_ms":5.49,"internal_bytes":311600,"psram_bytes":4740}
+BENCH {"model":"w16_224","max_internal":0,"test":true,"single_ms":20.45,"dual_ms":12.46,"internal_bytes":4656,"psram_bytes":356248}
+BENCH {"model":"w16_224","max_internal":307200,"test":true,"single_ms":18.91,"dual_ms":10.93,"internal_bytes":311856,"psram_bytes":205720}
+BENCH {"model":"w16_320","max_internal":0,"test":true,"single_ms":42.44,"dual_ms":26.51,"internal_bytes":4656,"psram_bytes":721816}
+BENCH {"model":"w16_320","max_internal":307200,"test":true,"single_ms":40.04,"dual_ms":23.82,"internal_bytes":311856,"psram_bytes":414616}
+BENCH {"model":"w16_480","max_internal":0,"test":true,"single_ms":95.21,"dual_ms":57.88,"internal_bytes":4388,"psram_bytes":1617544}
+BENCH {"model":"w16_480","max_internal":307200,"test":true,"single_ms":93.84,"dual_ms":56.92,"internal_bytes":311600,"psram_bytes":1617544}
+BENCH_DONE

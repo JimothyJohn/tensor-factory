@@ -157,6 +157,24 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       difficulty: low
       id: edge-readonly-key
 
+- [ ] **Feed the ESP32-P4 detector from the camera.** The firmware under
+  `firmware/esp32-p4/` runs the detector on frames embedded in the image. Next is the real
+  path: MIPI-CSI camera into the ISP, the PPA scaling to the model's input size, inference
+  on the second core. Step 7 of the P4 brief.
+      needs: which camera module is on the board, and a part in front of it
+      result: live boxes from the camera, with frames per second measured end to end
+      difficulty: high
+      id: p4-camera-pipeline
+
+- [ ] **Pick the ESP32-P4 input size with more held-out data.** On the board 480 / 320 /
+  224 / 160 px run at 13 / 32 / 65 / 128 frames a second. On about 26 held-out frames the
+  four sizes cannot be told apart for accuracy (see `firmware/esp32-p4/README.md`). Repeat
+  the retraining over several seeds with a larger held-out set before choosing.
+      result: one input size chosen for the P4, with its accuracy cost stated
+      est: 3h
+      difficulty: med
+      id: p4-input-size
+
 ## Model quality
 
 - [ ] **Box localization is the quality ceiling.** Center error is about 34 px on real

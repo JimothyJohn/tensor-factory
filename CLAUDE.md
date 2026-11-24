@@ -55,6 +55,13 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   up. `scripts/store_bucket.sh` creates or re-asserts the bucket (public access blocked,
   TLS-only, versioned, lifecycle rules). Config: `TENSOR_FACTORY_STORE=s3://…` plus the
   usual `AWS_*` variables. The real-bucket tests are `-m integration` and skip without it.
+- **ESP32-P4 firmware (`firmware/esp32-p4/`).** The one deliberate exception to "one
+  language": an ESP-IDF C++ project, outside the uv workspace, that runs the detector as a
+  static int8 `.espdl` model on ESP-DL. `tools/export_espdl.py` (ESP-PPQ, in its own venv)
+  quantizes the convolutional graph from any exported detector ONNX; the soft-argmax is done
+  in firmware. Measured on the board: `cam-v1` at 480 px in 76 ms a frame, a 160 px retrain
+  in 7.8 ms, both bit-identical to the desktop int8 graph. No camera pipeline yet. Commands
+  and numbers: [`firmware/esp32-p4/README.md`](firmware/esp32-p4/README.md).
 - **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
   the file (atomically: write beside, `mv` over) and the next request loads it. A
   replacement that fails to load keeps the old model serving; `/model_info` reports
