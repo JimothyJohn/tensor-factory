@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "size": 480,
+    "gain": 1.277135732129662,
+    "source": "helicoil-presence-cam-v1.onnx"
+  },
+  "float": {
+    "center_err_px_mean": 36.03,
+    "center_err_px_median": 30.3,
+    "presence_acc": 0.9953,
+    "images": 212
+  },
+  "int8": {
+    "center_err_px_mean": 36.79,
+    "center_err_px_median": 31.01,
+    "presence_acc": 0.9953,
+    "images": 212
+  }
+}
