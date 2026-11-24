@@ -82,6 +82,7 @@
         <div class="block">
           <h2>Trainer <small id="backendTag">starting…</small></h2>
           <div class="trainer">
+            <div id="verdict" class="verdict"></div>
             <canvas id="sparkline" width="292" height="64"></canvas>
             <div class="metrics">
               <div class="metric"><span>val center-err</span><b id="mErr">—</b></div>
@@ -98,7 +99,26 @@
               <tbody></tbody>
             </table>
             <div id="guardrail" class="guardrail"></div>
+            <div id="configLine" class="config-line"></div>
             <button class="btn ghost" id="pauseBtn">Pause training</button>
+          </div>
+        </div>
+
+        <div class="block">
+          <h2>Device <small>put the model on a board</small></h2>
+          <div class="device">
+            <div class="device-row">
+              <select id="devicePort" aria-label="Serial port of the board"></select>
+              <button class="btn" id="deployBtn" title="Quantize the current model for the ESP32-P4 and write it to the board on this port. No firmware rebuild.">Flash ESP32-P4</button>
+            </div>
+            <div id="deployStatus" class="deploy-status"></div>
+            <div class="downloads">
+              <span>Or take the file:</span>
+              <button class="link" data-format="p4">ESP32-P4 image</button>
+              <button class="link" data-format="pyz">Linux edge.pyz</button>
+              <button class="link" data-format="onnx">ONNX</button>
+            </div>
+            <div id="downloadHint" class="download-hint"></div>
           </div>
         </div>
 

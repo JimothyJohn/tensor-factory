@@ -1,2 +1,4 @@
 # Name,   Type, SubType, Offset,  Size, Flags
-factory,  app,  factory,  0x010000,  15M,
+factory,  app,  factory,  0x010000,  11M,
+# The deployed model: a 64-byte header, then the .espdl at +4096. Written by tools/deploy.py.
+model,    data, 0x40,     0xB10000,  4M,

@@ -13,7 +13,36 @@ lines of firmware (`decode_box` in `main/app_main.cpp`).
 - ESP-IDF **v5.5.5 or newer** (chip revision v3.2 needs it); built and measured with v5.5.6.
 - ESP-DL 3.3.15 (fetched by the component manager, pinned in `main/idf_component.yml`).
 - ESP-PPQ in its own Python environment, for quantization:
-  `uv venv ~/esp/ppq-venv --python 3.11 && VIRTUAL_ENV=~/esp/ppq-venv uv pip install esp-ppq torch pillow`
+  `uv venv ~/esp/ppq-venv --python 3.11 && VIRTUAL_ENV=~/esp/ppq-venv uv pip install esp-ppq torch pillow esptool`
+  (`esptool` is for `tools/deploy.py`; it brings `pyserial`).
+
+## Put a model on the board (no rebuild)
+
+Flash this firmware once (`idf.py set-target esp32p4 && idf.py build && idf.py -p PORT flash`
+with an empty `main/models/`). After that a model is one write to the `model` flash
+partition, about 11 s, and the Studio's **Flash ESP32-P4** button does all of it:
+
+```sh
+PYTHONPATH=../../packages/tensor-factory-train/src:../../packages/tensor-factory/src \
+  ~/esp/ppq-venv/bin/python tools/export_espdl.py --size 224 --onnx MODEL.onnx \
+  --calib DATASET/images --out m.espdl                      # about 16 s
+~/esp/ppq-venv/bin/python tools/deploy.py pack --espdl m.espdl --report m.report.json --out m.p4.bin
+~/esp/ppq-venv/bin/python tools/deploy.py flash --port PORT --image photo.jpg m.p4.bin
+~/esp/ppq-venv/bin/python tools/deploy.py detect --port PORT photo.jpg
+```
+
+`pack` puts a 64-byte header in front of the `.espdl` (name, input size, soft-argmax gain,
+CRC32). On boot the firmware checks the CRC, runs ESP-DL's self-test, times the network and
+prints one `MODEL {json}` line, then `READY`. From there each `IMG <base64 JPEG>` line on
+the console gets a `DET {json}` line back (box, presence logit, per-stage times), and
+`PING <token>` gets `READY <token>`. JPEGs must be baseline. `flash` fails unless the board
+reports the CRC that was written and a passing self-test; a board that is not a P4 is
+refused by `esptool`.
+
+Measured 2026-11-24 on board 1: the pets model (224 px, context 4, 383 KB) written and
+confirmed in 11 s; a 240x320 JPEG sent over the console, file to box, 33.5 ms on the board
+(15.7 decode, 1.7 resize, 15.6 network, 0.5 box). The console runs at 115200 baud, so
+sending that 14 KB file (19 KB as base64) takes well over a second; that is the transport, not the detector.
 
 ## Use
 
@@ -36,6 +65,9 @@ idf.py set-target esp32p4 && idf.py build
 idf.py -p PORT flash
 python tools/capture.py PORT --until BENCH_DONE        # resets the board, prints its output
 ```
+
+The app partition is 11 MB (it was 15 MB before the `model` partition existed), so
+`tools/run_pets.sh` embeds 8.5 MB of JPEGs per batch.
 
 `main/models/` is generated and gitignored. `models.inc` lists the models to sweep,
 `detect.inc` the one model to soak, `frames.inc` the frames and the answers the desktop
@@ -152,5 +184,6 @@ the board in batches, `tools/score.py` scores the output.
 design change is deliberate: the soft-argmax (Softmax, Range, Reshape, ReduceSum) is not in
 the on-device graph; it is done in firmware.
 
-**Not done.** Images are embedded in the firmware image, not sent to the board at run time. No
-quantization-aware training. Only one of the two boards was flashed.
+**Not done.** The only way to hand the board an image at run time is the 115200 baud
+console (there is no camera and no network code). No quantization-aware training. Only one
+of the two boards was flashed. A model with a class head deploys as box + presence only.

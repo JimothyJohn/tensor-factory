@@ -608,3 +608,78 @@ main > * {
     transition: none;
   }
 }
+
+/* trainer verdict: the plain-words answer above the numbers */
+.verdict {
+  font-size: 15px;
+  line-height: 1.35;
+}
+.verdict:empty,
+.config-line:empty,
+.deploy-status:empty,
+.download-hint:empty {
+  display: none;
+}
+.verdict.beats,
+.deploy-status.beats {
+  color: var(--accent);
+}
+.verdict.loses,
+.verdict.unsure,
+.deploy-status.loses,
+.deploy-status.unsure {
+  color: var(--warn);
+}
+.config-line {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* device panel */
+.device {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.device-row {
+  display: flex;
+  gap: 8px;
+}
+.device-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+}
+.deploy-status {
+  font-size: 15px;
+  line-height: 1.35;
+}
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--accent);
+}
+.download-hint {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

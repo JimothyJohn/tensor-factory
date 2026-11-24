@@ -32,6 +32,8 @@ The dataset and the detector improve together, live.
   the repo's bundled models, so it emits the canonical **int8 ONNX**), live per-epoch val
   metrics vs the constant-predictor baseline, auto-labeling from the best checkpoint, and a
   keep-best guardrail that won't let a regressed round overwrite a good model.
+- **Device:** one button writes the current model to an ESP32-P4 on USB and reports what
+  the board measured; or download the file for a P4 or for any Linux box.
 
 ## Run
 
@@ -41,8 +43,30 @@ uv run tensor-factory-studio   # serves UI + API on http://127.0.0.1:8089
 # open the printed URL in a Chromium-based browser (File System Access export needs Chromium)
 ```
 
-Flags: `--port --data-dir --ui-dir --size --width --epochs --batch`. For a snappier dev
-loop on CPU, a smaller model trains faster: `--size 96 --width 8 --epochs 4`.
+Flags: `--port --data-dir --ui-dir --size --width --context --resize --epochs --batch`. For
+a snappier dev loop on CPU, a smaller model trains faster: `--size 96 --width 8 --epochs 4`.
+
+### What it trains, and why
+
+The defaults are the model that held up on a microcontroller, not the 480 px one the
+bundled demo uses:
+
+- **`--size 224`.** On a couple of hundred frames, 160 to 320 px could not be told apart
+  from 480 px, and 224 px runs in 15 ms on an ESP32-P4 against 76 ms.
+- **`--context 4`.** Four extra blocks so the detector sees a 159 px window instead of
+  31 px. Without them it only works when the object fills a fixed view; on photos where
+  the object changes size it never beat "always guess the average box".
+- **`--resize mixed`.** Training images are scaled with bilinear or nearest-neighbour,
+  picked per sample, so a device that can only subsample sees pixels the model knows. It
+  was also the better model on the desktop.
+
+`--size 480 --context 0 --resize bilinear` is the old behaviour.
+
+The trainer panel opens with one sentence: whether the model is finding the object or is
+no better than always guessing the average box, and whether the held-out set is big enough
+to trust (under 30 held-out boxes it says so). Decoded images are cached between rounds, so
+a retrain after one new label decodes one new file: 12 epochs on 212 frames took 14.9 s
+before and about 5 s now.
 
 ### Train on data you already have
 
@@ -71,6 +95,18 @@ approved yet.
 3. **Export** — *Export dataset* writes the COCO dataset client-side; *Export model*
    downloads the backend's trained **int8 ONNX** (`/model`). The backend's own
    `<data-dir>/annotations.coco.json` is the same layout `tensor-factory-train` reads.
+4. **Put it on a device** — the *Device* block:
+   - **Flash ESP32-P4.** Pick the board's serial port and press the button. The machine
+     running the Studio quantizes the model (about 16 s the first time for a given model),
+     writes it to the board's model partition (about 11 s, no firmware rebuild), and the
+     panel shows what the board reported: self-test, milliseconds per inference, and how
+     well its box for one of your frames overlaps the desktop's. The board needs
+     [`firmware/esp32-p4`](../firmware/esp32-p4) flashed once, and this machine needs the
+     P4 tools (the panel prints the install line when they are missing).
+   - **ESP32-P4 image** downloads the same file to write yourself.
+   - **Linux edge.pyz** downloads one file holding the runtime, an HTTP server and the
+     model: `python3 edge.pyz --host 0.0.0.0` on any CPython 3.11+, then `POST /detect`.
+   - **ONNX** is the plain int8 model.
 
 ## Keys (left hand · mouse stays on the canvas)
 
@@ -91,6 +127,8 @@ browser (studio/)                         backend (packages/tensor-factory-studi
   canvas + WASD labeling     --- HTTP -->    GET  /metrics  -> live training metrics (polled)
   IndexedDB (UI state)                       POST /predict  -> auto-label via best checkpoint
   metrics panel + sparkline                  GET  /model    -> trained int8 ONNX
+  device panel                               GET  /model?format=p4|pyz -> device files
+                                             POST /deploy?port=  -> write it to a P4 on USB
                                              (continuous torch training thread, MPS/CUDA)
 ```
 
@@ -107,4 +145,5 @@ js/codec.js       4×uint8 codec + BBox      js/trainer.js  REST client for the 
 js/dhash.js       dHash + Hamming           js/app.js      wiring
 js/store.js       IndexedDB wrapper
 js/video.js       fps sampling + dedup      js/canvas.js   bounding-box canvas editor
+js/verdict.js     "is it finding it?" line  js/device.js   device panel + deploy client
 ```

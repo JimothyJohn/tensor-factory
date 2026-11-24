@@ -63,6 +63,17 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   in 7.8 ms, both bit-identical to the desktop int8 graph; a JPEG file to a box in 70 ms. The board
   has no camera. Commands
   and numbers: [`firmware/esp32-p4/README.md`](firmware/esp32-p4/README.md).
+- **A model reaches the P4 without a rebuild.** The firmware reads its model from a `model`
+  flash partition (64-byte header + `.espdl`); `tools/deploy.py pack|flash|detect` writes
+  it with `esptool` (about 11 s), checks the board's CRC and self-test, and can send a JPEG
+  over the console for a box. The Studio's Device panel does the same from the browser
+  (`POST /deploy?port=`, `GET /model?format=p4|pyz`), run by the machine the Studio is on;
+  it needs the P4 tools interpreter (`TENSOR_FACTORY_P4_PYTHON`, default
+  `~/esp/ppq-venv/bin/python`, with `esp-ppq torch pillow esptool`). The real-board test is
+  `-m integration` and needs `TENSOR_FACTORY_P4_PORT`.
+- **The Studio trains 224 px, `--context 4`, `--resize mixed` by default** (what held up on
+  the P4), opens its trainer panel with a plain verdict against the constant predictor, and
+  keeps decoded images between rounds (`tensor_factory_train.train.ImageCache`, `fit(cache=)`).
 - **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
   the file (atomically: write beside, `mv` over) and the next request loads it. A
   replacement that fails to load keeps the old model serving; `/model_info` reports

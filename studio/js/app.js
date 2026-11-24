@@ -10,6 +10,8 @@ import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
 import { Trainer } from "./trainer.js";
 import { sourceRows } from "./sources.js";
+import { deployLine, Device, DOWNLOADS, howToUse, portOptions } from "./device.js";
+import { configLine, verdict } from "./verdict.js";
 import { toast } from "./toast.js";
 
 const PALETTE = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa"];
@@ -493,6 +495,10 @@ function renderMetrics(m) {
   $("mPresence").textContent = m.presenceAcc == null ? "—" : `${(m.presenceAcc * 100).toFixed(0)}%`;
   $("mGain").textContent = m.gain == null ? "—" : m.gain.toFixed(2);
   $("mEpoch").textContent = `${m.epoch} · ${m.trainCount}t/${m.valCount}v`;
+  const v = verdict(m);
+  $("verdict").className = `verdict ${v.tone}`;
+  $("verdict").textContent = v.text;
+  $("configLine").textContent = configLine(m.config);
   renderSources(m.sources, m.baseline);
   renderGuardrail(m);
   drawSparkline(m.history, m.bestErr, m.baseline);
@@ -516,6 +522,59 @@ function renderSources(sources, baseline) {
       return tr;
     }),
   );
+}
+
+// --- device panel -------------------------------------------------------------------
+function renderDevices(d) {
+  const select = $("devicePort");
+  const keep = select.value;
+  const opts = portOptions(d.ports);
+  select.replaceChildren(
+    ...opts.map((o) => {
+      const el = document.createElement("option");
+      el.value = o.value;
+      el.textContent = o.label; // a device path: text, never HTML
+      return el;
+    }),
+  );
+  if (opts.some((o) => o.value === keep)) select.value = keep;
+  $("deployBtn").disabled = !d.p4Tools || opts.length === 0;
+  if (!d.p4Tools) setDeployStatus({ tone: "unsure", text: d.hint || "" });
+  else if (opts.length === 0) setDeployStatus({ tone: "", text: "No board found. Plug one in over USB." });
+}
+
+function setDeployStatus({ tone, text }) {
+  const el = $("deployStatus");
+  el.className = `deploy-status ${tone}`;
+  el.textContent = text;
+}
+
+function renderDeploy(state) {
+  setDeployStatus(deployLine(state));
+  $("deployBtn").disabled = state.state === "running";
+  if (state.state === "done") toast.success("Model is on the board.");
+  if (state.state === "error") toast.error(`Deploy: ${state.error}`);
+}
+
+async function downloadModel(format) {
+  $("downloadHint").textContent = format === "p4" ? "Preparing the board image…" : "";
+  try {
+    const { blob, name } = await device.download(format);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $("downloadHint").textContent = howToUse(format);
+    toast.success(`Model exported: ${DOWNLOADS[format].label} (${(blob.size / 1024).toFixed(0)} KB).`);
+  } catch (e) {
+    $("downloadHint").textContent = "";
+    if (/no model trained yet/.test(e.message)) {
+      toast.info("No trained model yet — label a few frames first.");
+    } else {
+      toast.error(`${DOWNLOADS[format].label}: ${e.message}`);
+    }
+  }
 }
 
 function renderGuardrail(m) {
@@ -588,6 +647,7 @@ function drawSparkline(history, best, baseline) {
 // --- boot ------------------------------------------------------------------
 let editor;
 let trainer;
+let device;
 
 async function main() {
   state.store = await Store.create();
@@ -743,26 +803,17 @@ async function main() {
     e.target.value = "";
   });
   $("exportBtn").addEventListener("click", doExport);
-  $("exportModelBtn").addEventListener("click", async () => {
-    try {
-      const res = await fetch("/model");
-      if (!res.ok) {
-        toast.info("No trained model yet — label a few frames first.");
-        return;
-      }
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "tinydetector.onnx";
-      a.click();
-      URL.revokeObjectURL(a.href);
-      const m = `Model exported (int8 ONNX, ${(blob.size / 1024).toFixed(0)} KB).`;
-      $("ingestStatus").textContent = m;
-      toast.success(m);
-    } catch (e) {
-      toast.error("Model export failed: " + e.message);
-    }
+  $("exportModelBtn").addEventListener("click", () => downloadModel("onnx"));
+  device = new Device({ onState: renderDeploy, onDevices: renderDevices });
+  device.refresh();
+  $("devicePort").addEventListener("focus", () => device.refresh()); // a board plugged in later
+  $("deployBtn").addEventListener("click", () => {
+    const port = $("devicePort").value;
+    if (port) device.deploy(port);
   });
+  for (const btn of document.querySelectorAll(".downloads .link")) {
+    btn.addEventListener("click", () => downloadModel(btn.dataset.format));
+  }
   $("pauseBtn").addEventListener("click", () => {
     if (trainer.running) {
       trainer.pause();
