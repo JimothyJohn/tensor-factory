@@ -157,6 +157,15 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       difficulty: low
       id: edge-readonly-key
 
+- [ ] **Pick the ESP32-P4 input size with more held-out data.** On the board 480 / 320 /
+  224 / 160 px run at 13 / 32 / 65 / 128 frames a second. On about 26 held-out frames the
+  four sizes cannot be told apart for accuracy (see `firmware/esp32-p4/README.md`). Repeat
+  the retraining over several seeds with a larger held-out set before choosing.
+      result: one input size chosen for the P4, with its accuracy cost stated
+      est: 3h
+      difficulty: med
+      id: p4-input-size
+
 ## Model quality
 
 - [ ] **Box localization is the quality ceiling.** Center error is about 34 px on real

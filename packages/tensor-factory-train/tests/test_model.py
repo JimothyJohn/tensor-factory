@@ -9,7 +9,14 @@ from PIL import Image  # noqa: E402
 from tensor_factory.geometry import BBox  # noqa: E402
 from tensor_factory.inference import Detector  # noqa: E402
 from tensor_factory_train.model import TinyDetector, soft_argmax_xyxy  # noqa: E402
-from tensor_factory_train.train import _BoxDataset, _flip_box, export_onnx, fit  # noqa: E402
+from tensor_factory_train.train import (  # noqa: E402
+    _BoxDataset,
+    _flip_box,
+    _load_chw,
+    _resample,
+    export_onnx,
+    fit,
+)
 
 
 @pytest.mark.unit
@@ -185,3 +192,100 @@ def test_detect_class_raises_without_class_head(tmp_path):
     assert not det.has_class
     with pytest.raises(RuntimeError, match="no class head"):
         det.detect_class(Image.new("RGB", (64, 64), (0, 0, 0)))
+
+
+@pytest.mark.unit
+def test_context_default_keeps_the_original_parameter_names():
+    # Old checkpoints and exports must keep loading: context blocks are opt-in and appended.
+    keys = {
+        k.split(".")[1] for k in TinyDetector(width=8).state_dict() if k.startswith("features.")
+    }
+    assert keys == {"0", "1", "2", "3"}
+    wide = TinyDetector(width=8, context=2).state_dict()
+    assert {k.split(".")[1] for k in wide if k.startswith("features.")} == {
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+    }
+
+
+@pytest.mark.unit
+def test_context_widens_what_a_heatmap_cell_sees():
+    # A change about 50 px from the top-left cell: outside the 31 px window of four stride-2
+    # blocks, inside it once four context blocks widen the window to 159 px.
+    def top_left_moves(context: int) -> bool:
+        torch.manual_seed(0)
+        model = TinyDetector(width=8, context=context).eval()
+        base, poked = torch.zeros(1, 3, 224, 224), torch.zeros(1, 3, 224, 224)
+        poked[:, :, 48:60, 48:60] = 1.0
+        with torch.no_grad():
+            a = model.heat(model.features(base))[0, :, 0, 0]
+            b = model.heat(model.features(poked))[0, :, 0, 0]
+        return not torch.equal(a, b)
+
+    assert top_left_moves(0) is False
+    assert top_left_moves(4) is True
+
+
+@pytest.mark.unit
+def test_context_keeps_the_heatmap_resolution():
+    for context in (0, 3):
+        model = TinyDetector(width=8, context=context)
+        assert model.heat(model.features(torch.zeros(1, 3, 96, 96))).shape == (1, 4, 6, 6)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("context", [-1, -100])
+def test_negative_context_is_rejected(context):
+    with pytest.raises(ValueError, match="context"):
+        TinyDetector(context=context)
+
+
+@pytest.mark.unit
+def test_export_and_detect_with_context_roundtrip(tmp_path):
+    model = TinyDetector(width=8, presence=True, context=2)
+    out = export_onnx(model, tmp_path / "ctx.onnx", size=64)
+    det = Detector(out, input_size=64)
+    image = Image.new("RGB", (64, 64), (120, 90, 60))
+    assert isinstance(det.detect_box(image), BBox)
+    assert 0.0 <= det.detect_presence(image) <= 1.0
+
+
+def _checker(tmp_path):
+    # 1 px checkerboard: bilinear downscaling averages it to grey, nearest keeps pure 0/255.
+    img = Image.new("L", (64, 64))
+    img.putdata([255 * ((x + y) % 2) for y in range(64) for x in range(64)])
+    path = tmp_path / "checker.png"
+    img.convert("RGB").save(path)
+    return path
+
+
+@pytest.mark.unit
+def test_resize_mode_changes_the_pixels_the_model_sees(tmp_path):
+    path = _checker(tmp_path)
+    nearest = _load_chw(path, 16, _resample("nearest", train=True))
+    bilinear = _load_chw(path, 16, _resample("bilinear", train=True))
+    assert set(nearest.unique().tolist()) <= {0.0, 1.0}
+    assert 0.2 < float(bilinear.mean()) < 0.8 and float(bilinear.std()) < 0.2
+    assert not torch.equal(nearest, bilinear)
+
+
+@pytest.mark.unit
+def test_mixed_resize_trains_on_both_and_validates_on_bilinear(tmp_path):
+    path = _checker(tmp_path)
+    data = _BoxDataset([(path, BBox(0.1, 0.1, 0.9, 0.9))] * 40, 16, resize="mixed")
+    binary = [set(data[i][0].unique().tolist()) <= {0.0, 1.0} for i in range(40)]
+    assert any(binary) and not all(binary)
+    assert {_resample("mixed", train=False) for _ in range(20)} == {Image.Resampling.BILINEAR}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["", "NEAREST", "bicubic", "area"])
+def test_unknown_resize_mode_is_rejected(tmp_path, mode):
+    with pytest.raises(ValueError, match="resize"):
+        _BoxDataset([], 16, resize=mode)
+    with pytest.raises(ValueError, match="resize"):
+        _resample(mode, train=False)

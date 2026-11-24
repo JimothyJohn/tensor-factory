@@ -27,6 +27,8 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         require_review=not args.allow_unreviewed,
         negatives=args.negatives,
         learn_gain=not args.freeze_gain,
+        context=args.context,
+        resize=args.resize,
     )
     print(f"wrote int8 ONNX -> {out}")
     return 0
@@ -84,6 +86,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--freeze-gain",
         action="store_true",
         help="freeze the soft-argmax gain at 1 (ablation; default lets it learn to sharpen)",
+    )
+    f.add_argument(
+        "--context",
+        type=int,
+        default=0,
+        help="extra 3x3 blocks at the coarsest resolution; each lets a cell see 32 px more "
+        "(default 0: a 31 px window, fine for a part that fills a fixed view)",
+    )
+    f.add_argument(
+        "--resize",
+        choices=("bilinear", "nearest", "mixed"),
+        default="bilinear",
+        help="how training images are scaled to --size. Match the runtime: 'nearest' for one "
+        "that can only subsample (ESP-DL on a microcontroller), 'mixed' for a model that "
+        "must serve both",
     )
     f.set_defaults(func=_cmd_fit)
     return parser

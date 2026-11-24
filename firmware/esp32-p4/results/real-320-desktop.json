@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "size": 320,
+    "gain": 1.2780845988148488,
+    "source": "real-320.onnx (trained 2026-11-23, real + real_neg, 80 epochs)"
+  },
+  "float": {
+    "center_err_px_mean": 39.16,
+    "center_err_px_median": 29.19,
+    "presence_acc": 0.9906,
+    "images": 212
+  },
+  "int8": {
+    "center_err_px_mean": 39.59,
+    "center_err_px_median": 29.44,
+    "presence_acc": 0.9906,
+    "images": 212
+  }
+}

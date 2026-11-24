@@ -1,0 +1,6 @@
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+# generated models, frames (real camera data) and their include lists
+main/models/

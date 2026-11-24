@@ -201,6 +201,8 @@ PYTHONPATH=edge.pyz python3 -m tensor_factory.cli store pull-model SHA256 --out 
             <tr><td><code>--negatives</code></td><td>none</td><td>one or more dirs of no-object images that train the objectness head toward <em>absent</em> (turns the presence head on; box loss masked)</td></tr>
             <tr><td><code>--allow-unreviewed</code></td><td>off</td><td>train on un-validated labels too (default: only human-approved)</td></tr>
             <tr><td><code>--freeze-gain</code></td><td>off</td><td>freeze the soft-argmax gain at 1 (ablation; default lets it learn)</td></tr>
+            <tr><td><code>--context</code></td><td><code>0</code></td><td>extra 3×3 blocks at the coarsest resolution; each lets a cell see 32 px more of the image (use for objects that vary in size)</td></tr>
+            <tr><td><code>--resize</code></td><td><code>bilinear</code></td><td><code>bilinear</code>, <code>nearest</code> or <code>mixed</code>: how training images are scaled. Use <code>mixed</code> for a model that also runs where images can only be subsampled (a microcontroller)</td></tr>
           </tbody>
         </table>
         <p>Needs the <code>train</code> extra (<code>torch</code>). See <a class="inline" href="architecture.html#model">Internals &rsaquo; the model</a> for what <code>--width</code> and <code>--freeze-gain</code> change.</p>

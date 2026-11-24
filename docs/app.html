@@ -712,7 +712,7 @@ footer { border-top: 2px solid var(--line); }
             const src = (c * h + r) * wd, dst = (c * hp + r + pt) * wp + pl;
             xp.set(x.data.subarray(src, src + wd), dst);
           }
-        const mPerG = m / g, taps = cinG * kh * kw;
+        const mPerG = m / g;
         const out = new Float64Array(m * nl);
         for (let f = 0; f < m; f++) {
           const acc = out.subarray(f * nl, (f + 1) * nl);
