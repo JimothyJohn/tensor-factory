@@ -27,24 +27,80 @@ The dataset and the detector improve together, live.
 
 - **Browser:** video ingest sampling at N fps with dHash dedup (skips frames too similar to
   ones already labeled), the bounding-box canvas editor, the WASD keymap, IndexedDB
-  persistence, and File-System-Access COCO export.
-- **Backend:** continuous training via `tensor_factory_train.fit` (the same path that makes
-  the repo's bundled models, so it emits the canonical **int8 ONNX**), live per-epoch val
-  metrics vs the constant-predictor baseline, auto-labeling from the best checkpoint, and a
-  keep-best guardrail that won't let a regressed round overwrite a good model.
-- **Device:** one button writes the current model to an ESP32-P4 on USB and reports what
-  the board measured; or download the file for a P4 or for any Linux box.
+  persistence, File-System-Access COCO export, and **training itself, on your GPU through
+  WebGPU**: live per-epoch held-out error against the constant-predictor baseline,
+  auto-labeling from the best checkpoint, a keep-best guardrail, and export of the
+  canonical **int8 ONNX**.
+- **Local helper (optional):** `uv run tensor-factory-studio` serves the same page and
+  adds what a browser cannot do: one button writes the model to an ESP32-P4 on USB and
+  reports what the board measured, `edge.pyz` for any Linux box, GroundingDINO auto-label,
+  and training on datasets already on disk (`--source`).
 
 ## Run
 
+Either open the hosted page (linked from the project site, under `studio/`), or in the repo:
+
 ```sh
-uv sync --extra serve          # pulls torch (heavy); training resolves cuda → mps → cpu
-uv run tensor-factory-studio   # serves UI + API on http://127.0.0.1:8089
-# open the printed URL in a Chromium-based browser (File System Access export needs Chromium)
+uv run tensor-factory-studio   # http://127.0.0.1:8089, a few seconds, no torch download
 ```
 
-Flags: `--port --data-dir --ui-dir --size --width --context --resize --epochs --batch`. For
-a snappier dev loop on CPU, a smaller model trains faster: `--size 96 --width 8 --epochs 4`.
+Use a browser with WebGPU (a current Chrome or Edge; File System Access export needs
+Chromium anyway). Label four frames and it starts training. Nothing is uploaded: frames
+stay in the page's IndexedDB.
+
+Where training runs is decided when the page loads, and the Trainer panel says which:
+
+| Situation | Trains on |
+|---|---|
+| WebGPU available | the browser, whether or not the helper is running |
+| helper started with `--source` | the helper (only it can read those folders) |
+| no WebGPU, helper running with torch (`uv sync --extra serve`) | the helper (cuda → mps → cpu) |
+| neither | nothing: the panel says what to install |
+
+`?trainer=backend` or `?trainer=browser` on the page URL forces one when both exist.
+
+Flags: `--port --data-dir --ui-dir --size --width --context --resize --epochs --batch`. The
+browser trainer follows the helper's `--size --width --context --resize`, and takes
+`?size=&context=&resize=&epochs=` on the page URL when there is no helper.
+
+### The browser trainer is the same model, and that is tested
+
+A second trainer is only worth having if its numbers mean the same thing. Each layer is
+held to the Python one:
+
+- **The math** (`js/nn/ref.js`): forward pass, loss, every gradient and three Adam steps
+  equal what torch computes for `TinyDetector`, to 1e-8 or better (`tests/nn_ref.test.mjs` against
+  `tests/fixtures/torch_step.json`).
+- **The GPU kernels** (`js/nn/gpu.js`, plain WGSL, no library): the same checks in a real
+  browser, to 3e-5 in float32 (`python3 tests/gpu/run.py`; add `--train` for a whole
+  training run). Not in CI: it needs a GPU.
+- **The pixels** (`js/nn/data.js`): bilinear and nearest resize are byte-identical to
+  Pillow's (`test_browser_resize.py`).
+- **The file** (`js/nn/onnx.js`): the exported ONNX has the same uint8 weights, bit for
+  bit, as `tensor_factory_train.export_onnx` for the same parameters, and onnxruntime
+  gives the same outputs from both (`test_browser_export.py`).
+
+Measured on an M-series Mac (Metal): 49 ms a training step at 224 px, context 4, batch 16,
+roughly half the speed of torch on the same GPU. 120 frames (96 for training), 14 epochs,
+including decoding and resizing them: 5.7 s.
+
+What the browser trainer does not do yet: more than one class, flip augmentation, and
+per-source tables. Use the helper with torch for those.
+
+### Train on data you already have
+
+```bash
+uv sync --extra serve
+uv run tensor-factory-studio --source path/to/dataset --source path/to/another
+```
+
+Each `--source` is a dataset dir (`annotations.coco.json` + `images/`): an earlier Studio
+session's data dir, a synthetic set, a Label Studio pull. They are read in place and train
+together with the frames you label here, on the helper. With a source given the trainer
+starts at once, so there are predictions to correct from the first frame. The trainer panel
+lists every source with its own held-out error and presence accuracy, updated each epoch,
+so you can see which data the model is weak on. `--allow-unreviewed` includes labels nobody
+has approved yet.
 
 ### What it trains, and why
 
@@ -64,23 +120,8 @@ bundled demo uses:
 
 The trainer panel opens with one sentence: whether the model is finding the object or is
 no better than always guessing the average box, and whether the held-out set is big enough
-to trust (under 30 held-out boxes it says so). Decoded images are cached between rounds, so
-a retrain after one new label decodes one new file: 12 epochs on 212 frames took 14.9 s
-before and about 5 s now.
-
-### Train on data you already have
-
-```bash
-uv run tensor-factory-studio --source path/to/dataset --source path/to/another
-```
-
-Each `--source` is a dataset dir (`annotations.coco.json` + `images/`): an earlier Studio
-session's data dir, a synthetic set, a Label Studio pull. They are read in place and train
-together with the frames you label here. With a source given the trainer starts at once,
-so there are predictions to correct from the first frame. The trainer panel lists every
-source with its own held-out error and presence accuracy, updated each epoch, so you can
-see which data the model is weak on. `--allow-unreviewed` includes labels nobody has
-approved yet.
+to trust (under 30 held-out boxes it says so). Resized frames are kept between rounds, so
+a retrain after one new label decodes one new file.
 
 ## Workflow
 
@@ -96,8 +137,10 @@ approved yet.
    downloads the backend's trained **int8 ONNX** (`/model`). The backend's own
    `<data-dir>/annotations.coco.json` is the same layout `tensor-factory-train` reads.
 4. **Put it on a device** — the *Device* block:
-   - **Flash ESP32-P4.** Pick the board's serial port and press the button. The machine
-     running the Studio quantizes the model (about 16 s the first time for a given model),
+   - **Flash ESP32-P4.** Needs the local helper. Pick the board's serial port and press the
+     button. A model trained in the browser is handed to the helper first, with up to 32 of
+     your labeled frames to calibrate the quantizer. The machine running the helper
+     quantizes the model (about 16 s the first time for a given model),
      writes it to the board's model partition (about 11 s, no firmware rebuild), and the
      panel shows what the board reported: self-test, milliseconds per inference, and how
      well its box for one of your frames overlaps the desktop's. The board needs
@@ -132,9 +175,10 @@ browser (studio/)                         backend (packages/tensor-factory-studi
                                              (continuous torch training thread, MPS/CUDA)
 ```
 
-Why a backend and not in-browser training: it reuses the trusted torch trainer (so the
-browser model *is* the deployable model), runs real GPU training, and is verifiable locally
-end to end. The earlier in-browser WebGPU/tfjs approach is recorded in `PROMPT.md`.
+Training moved into the browser once the three reasons it had left were gone: it is
+checked in a real headless browser with a real GPU, it uses no library (hand-written
+WGSL), and its export is the same file the torch trainer writes. `PROMPT.md` has the
+history.
 
 ## Layout
 
@@ -145,5 +189,9 @@ js/codec.js       4×uint8 codec + BBox      js/trainer.js  REST client for the 
 js/dhash.js       dHash + Hamming           js/app.js      wiring
 js/store.js       IndexedDB wrapper
 js/video.js       fps sampling + dedup      js/canvas.js   bounding-box canvas editor
+js/engine.js      browser or backend?       js/local.js    the in-browser training loop
+js/nn/ref.js      the math, on the CPU      js/nn/gpu.js   the same math in WGSL (WebGPU)
+js/nn/data.js     resize, split, scoring    js/nn/onnx.js  int8 ONNX writer
+models/           ONNX templates the writer fills (tools/make_templates.py)
 js/verdict.js     "is it finding it?" line  js/device.js   device panel + deploy client
 ```

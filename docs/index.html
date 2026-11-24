@@ -80,9 +80,10 @@
       <div class="pkg"><div class="name">Busywork never arrives</div><p class="desc">Frames are sampled at your fps and a perceptual-hash gate drops near-duplicates at ingest — every frame that reaches your screen is worth your attention.</p></div>
       <div class="pkg"><div class="name">Nudge, don't draw</div><p class="desc">The trainer runs continuously as you label; each frame arrives pre-filled with the model's current guess. Most are a glance and a Space — and when a guess is off, the drag that fixes it is exactly the training signal the model was missing.</p></div>
       <div class="pkg"><div class="name">Bad samples get caught</div><p class="desc">Nothing enters the dataset unconfirmed, and a guardrail watches validation every round — regressions point at the likely-bad samples, clickable, so you fix or drop and move on.</p></div>
-      <div class="pkg"><div class="name">The export is the deployable</div><p class="desc">The same trainer that builds the bundled models emits the canonical int8 ONNX — the model you nudged is the model you ship.</p></div>
-      <pre style="margin-top:1.4rem"><code><span class="c"># pulls torch; training resolves cuda &rarr; mps &rarr; cpu</span>
-uv sync --extra serve &amp;&amp; uv run tensor-factory-studio</code></pre>
+      <div class="pkg"><div class="name">The export is the deployable</div><p class="desc">The page writes the same int8 ONNX file the Python trainer does, weight for weight &mdash; the model you nudged is the model you ship.</p></div>
+      <div class="pkg"><div class="name"><a href="studio/">Open the Studio &rarr;</a></div><p class="desc">It trains in your browser, on your GPU (WebGPU: a current Chrome or Edge). Nothing to install, and your frames never leave the machine.</p></div>
+      <pre style="margin-top:1.4rem"><code><span class="c"># optional, in the repo: the same page plus a local helper that writes the model to a board</span>
+uv run tensor-factory-studio</code></pre>
       <p class="spec-note">Workflow and keymap: <a href="https://github.com/JimothyJohn/tensor-factory/tree/master/studio">studio/README.md &nearr;</a></p>
     </div>
   </section>

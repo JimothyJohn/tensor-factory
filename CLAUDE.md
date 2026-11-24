@@ -71,6 +71,17 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   it needs the P4 tools interpreter (`TENSOR_FACTORY_P4_PYTHON`, default
   `~/esp/ppq-venv/bin/python`, with `esp-ppq torch pillow esptool`). The real-board test is
   `-m integration` and needs `TENSOR_FACTORY_P4_PORT`.
+- **The Studio trains in the browser on WebGPU by default** (`studio/js/local.js`,
+  `js/nn/{ref,gpu,data,onnx}.js`; hand-written WGSL, no library). The Python backend is
+  optional: it serves the page without torch installed, flashes boards, and trains only when
+  the browser has no WebGPU or it was started with `--source`. The browser trainer is held
+  to the Python one layer by layer: the math to torch (`studio/tests/nn_ref.test.mjs`), the
+  resize to Pillow byte for byte (`test_browser_resize.py`), the exported ONNX to
+  `export_onnx` with bit-identical weights (`test_browser_export.py`, needs torch + node).
+  The WGSL itself is checked only locally, in headless Chromium with a real GPU:
+  `python3 studio/tests/gpu/run.py [--train]`. `docs/studio/` is a copy of the page for the
+  public site; `python3 scripts/sync_studio_site.py` after any change under `studio/` (a
+  unit test fails otherwise). Browser training is single-class, no augmentation.
 - **The Studio trains 224 px, `--context 4`, `--resize mixed` by default** (what held up on
   the P4), opens its trainer panel with a plain verdict against the constant predictor, and
   keeps decoded images between rounds (`tensor_factory_train.train.ImageCache`, `fit(cache=)`).

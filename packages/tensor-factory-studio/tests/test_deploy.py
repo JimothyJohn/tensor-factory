@@ -471,7 +471,9 @@ def test_frames_sent_with_a_browser_model_calibrate_and_probe(server):
         "frame_02.png",
     ]
     assert _calib_dir(ds, tr) == frames
-    with Image.open(io.BytesIO(_probe_frame(ds, tr))) as im:
+    probe = _probe_frame(ds, tr)
+    assert probe is not None
+    with Image.open(io.BytesIO(probe)) as im:
         assert im.size == (40, 30)
     # a new set starts at 0 and drops the old one
     assert _post_bytes(base, "/calib?i=0", _png((8, 8)))[0] == 200

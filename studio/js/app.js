@@ -864,8 +864,10 @@ async function main() {
   $("exportBtn").addEventListener("click", doExport);
   $("exportModelBtn").addEventListener("click", () => downloadModel("onnx"));
   device = new Device({ onState: renderDeploy, onDevices: renderDevices });
-  device.refresh();
-  $("devicePort").addEventListener("focus", () => device.refresh()); // a board plugged in later
+  // Without the local helper there is nothing to ask for ports (and no request to fail).
+  const refreshDevices = () => (run.backend ? device.refresh() : renderDevices({ ports: [], p4Tools: false }));
+  refreshDevices();
+  $("devicePort").addEventListener("focus", refreshDevices); // a board plugged in later
   $("deployBtn").addEventListener("click", async () => {
     const port = $("devicePort").value;
     if (!port) return;
