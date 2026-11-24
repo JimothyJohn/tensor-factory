@@ -69,9 +69,58 @@ def _resample(resize: str, *, train: bool) -> Image.Resampling:
     return Image.Resampling.BILINEAR
 
 
-def _load_chw(path: Path, size: int, resample: Image.Resampling = Image.Resampling.BILINEAR):  # noqa: ANN202
-    img = Image.open(path).convert("RGB").resize((size, size), resample)
-    arr = np.asarray(img, dtype=np.float32) / 255.0
+class ImageCache:
+    """Decoded, resized training images, kept between epochs and between ``fit`` calls.
+
+    Decoding and resizing every file again each epoch is most of a training run's time on
+    small models. A cache entry is the ``uint8`` pixels for one (file, size, filter); a file
+    that is rewritten (a frame re-labeled in the Studio) is decoded again because its
+    modification time changed. Nothing is evicted: once ``max_bytes`` is reached, further
+    images are simply decoded each time, as without a cache.
+    """
+
+    def __init__(self, max_bytes: int = 2 * 1024**3) -> None:
+        self.max_bytes = max_bytes
+        self.bytes = 0
+        self._items: dict[tuple[str, int, int], tuple[int, np.ndarray]] = {}
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def clear(self) -> None:
+        self._items.clear()
+        self.bytes = 0
+
+    def pixels(self, path: Path, size: int, resample: Image.Resampling) -> np.ndarray:
+        """``uint8`` HWC pixels of ``path`` at ``size`` x ``size``."""
+        key = (str(path), size, int(resample))
+        stamp = path.stat().st_mtime_ns
+        hit = self._items.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        arr = _pixels(path, size, resample)
+        if hit is not None:
+            self.bytes -= hit[1].nbytes
+            del self._items[key]
+        if self.bytes + arr.nbytes <= self.max_bytes:
+            self._items[key] = (stamp, arr)
+            self.bytes += arr.nbytes
+        return arr
+
+
+def _pixels(path: Path, size: int, resample: Image.Resampling) -> np.ndarray:
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB").resize((size, size), resample), dtype=np.uint8)
+
+
+def _load_chw(  # noqa: ANN202
+    path: Path,
+    size: int,
+    resample: Image.Resampling = Image.Resampling.BILINEAR,
+    cache: ImageCache | None = None,
+):
+    px = cache.pixels(path, size, resample) if cache is not None else _pixels(path, size, resample)
+    arr = px.astype(np.float32) / 255.0
     return torch.from_numpy(np.ascontiguousarray(arr.transpose(2, 0, 1)))
 
 
@@ -109,9 +158,11 @@ class _BoxDataset(Dataset):
         augment: bool = False,
         multiclass: bool = False,
         resize: str = "bilinear",
+        cache: ImageCache | None = None,
     ) -> None:
         _resample(resize, train=True)  # reject a bad mode up front, not on the first batch
         self.resize = resize
+        self.cache = cache
         self.items = items
         self.size = size
         self.presence = presence
@@ -125,7 +176,7 @@ class _BoxDataset(Dataset):
         item = self.items[index]
         path, box = item[0], item[1]
         label = item[2] if len(item) > 2 else 0
-        x = _load_chw(path, self.size, _resample(self.resize, train=True))
+        x = _load_chw(path, self.size, _resample(self.resize, train=True), self.cache)
         has_box = box is not None
         coords = (box.x1, box.y1, box.x2, box.y2) if has_box else (0.0, 0.0, 0.0, 0.0)
         if self.augment:
@@ -247,7 +298,7 @@ def _summarize(
 
 
 def _val_records(  # noqa: ANN001
-    model, val_items, size, dev, *, presence, multiclass=False, resize="bilinear"
+    model, val_items, size, dev, *, presence, multiclass=False, resize="bilinear", cache=None
 ) -> list[tuple[float | None, bool | None, bool | None]]:
     """One ``(center_err px, presence_correct, class_correct)`` record per held-out item,
     in ``val_items`` order -- the raw material for overall and per-source metrics alike."""
@@ -256,7 +307,7 @@ def _val_records(  # noqa: ANN001
     with torch.no_grad():
         for item in val_items:
             box = item[1]
-            x = _load_chw(item[0], size, _resample(resize, train=False))
+            x = _load_chw(item[0], size, _resample(resize, train=False), cache)
             raw = model(x.unsqueeze(0).to(dev))
             out: dict[str, Any] = (
                 dict(zip(model.output_names, raw, strict=True))
@@ -362,6 +413,7 @@ def fit(
     context: int = 0,
     resize: str = "bilinear",
     on_epoch: Callable[[dict], None] | None = None,
+    cache: ImageCache | None = None,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
 
@@ -397,9 +449,14 @@ def fit(
 
     ``on_epoch``, if given, is called once per epoch with a metrics dict (epoch, loss,
     val_err, presence_acc, class_acc, num_classes, baseline, best_err, is_best, gain,
-    train_count, val_count, sources) -- a live hook for callers like the Studio backend; it
-    does not affect training. ``sources`` is one dict per source (name, train, val, val_err,
-    presence_acc, class_acc), data dirs first, then negatives dirs.
+    train_count, val_count, val_boxes, sources) -- a live hook for callers like the Studio
+    backend; it does not affect training. ``val_boxes`` is how many held-out items carry a
+    box (the sample the error is measured on). ``sources`` is one dict per source (name,
+    train, val, val_err, presence_acc, class_acc), data dirs first, then negatives dirs.
+
+    ``cache``, an :class:`ImageCache`, keeps decoded images between epochs; pass the same
+    one to later calls and only new or rewritten files are decoded again. The pixels are
+    the same either way, so results do not change.
     """
     data_dirs = (
         [Path(data_dir)] if isinstance(data_dir, (str, Path)) else [Path(d) for d in data_dir]
@@ -473,6 +530,7 @@ def fit(
             augment=augment,
             multiclass=multiclass,
             resize=resize,
+            cache=cache,
         ),
         batch_size=batch,
         shuffle=True,
@@ -535,6 +593,7 @@ def fit(
                 presence=presence,
                 multiclass=multiclass,
                 resize=resize,
+                cache=cache,
             )
             err, acc, cls_acc = _summarize(records)
             # Higher is better. ``err`` is the median center error in *pixels*; normalize by
@@ -573,6 +632,7 @@ def fit(
                     "gain": float(model.log_gain.detach().exp()),
                     "train_count": len(train_items),
                     "val_count": len(val_items),
+                    "val_boxes": sum(1 for item in val_items if item[1] is not None),
                     "sources": _per_source(src_names, train_items, val_items, records),
                 }
             )
@@ -580,7 +640,14 @@ def fit(
     if best_state is not None:
         model.load_state_dict(best_state)
         records = _val_records(
-            model, val_items, size, dev, presence=presence, multiclass=multiclass, resize=resize
+            model,
+            val_items,
+            size,
+            dev,
+            presence=presence,
+            multiclass=multiclass,
+            resize=resize,
+            cache=cache,
         )
         err, acc, cls_acc = _summarize(records)
         if presence:

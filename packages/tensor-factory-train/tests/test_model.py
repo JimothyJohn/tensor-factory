@@ -10,6 +10,7 @@ from tensor_factory.geometry import BBox  # noqa: E402
 from tensor_factory.inference import Detector  # noqa: E402
 from tensor_factory_train.model import TinyDetector, soft_argmax_xyxy  # noqa: E402
 from tensor_factory_train.train import (  # noqa: E402
+    ImageCache,
     _BoxDataset,
     _flip_box,
     _load_chw,
@@ -289,3 +290,59 @@ def test_unknown_resize_mode_is_rejected(tmp_path, mode):
         _BoxDataset([], 16, resize=mode)
     with pytest.raises(ValueError, match="resize"):
         _resample(mode, train=False)
+
+
+@pytest.mark.unit
+def test_image_cache_returns_the_same_pixels_as_no_cache(tmp_path):
+    path = _checker(tmp_path)
+    cache = ImageCache()
+    for mode in ("nearest", "bilinear"):
+        resample = _resample(mode, train=False)
+        plain = _load_chw(path, 16, resample)
+        assert torch.equal(_load_chw(path, 16, resample, cache), plain)  # miss
+        assert torch.equal(_load_chw(path, 16, resample, cache), plain)  # hit
+    assert len(cache) == 2  # one entry per filter: they are different pixels
+
+
+@pytest.mark.unit
+def test_image_cache_decodes_a_rewritten_file_again(tmp_path):
+    # The Studio overwrites a frame's file when it is re-labeled; a stale hit would train
+    # on pixels that are no longer on disk.
+    import os
+
+    path = tmp_path / "frame.png"
+    Image.new("RGB", (32, 32), (0, 0, 0)).save(path)
+    cache = ImageCache()
+    resample = _resample("bilinear", train=False)
+    assert float(_load_chw(path, 8, resample, cache).max()) == 0.0
+    Image.new("RGB", (32, 32), (255, 255, 255)).save(path)
+    os.utime(path, ns=(1, path.stat().st_mtime_ns + 1_000_000_000))
+    assert float(_load_chw(path, 8, resample, cache).min()) == 1.0
+    assert len(cache) == 1 and cache.bytes == 8 * 8 * 3
+
+
+@pytest.mark.unit
+def test_image_cache_stops_growing_at_its_budget_but_still_serves(tmp_path):
+    cache = ImageCache(max_bytes=8 * 8 * 3)  # room for exactly one 8 px image
+    resample = _resample("bilinear", train=False)
+    paths = []
+    for i, v in enumerate((10, 200)):
+        paths.append(tmp_path / f"{i}.png")
+        Image.new("RGB", (32, 32), (v, v, v)).save(paths[-1])
+    first = _load_chw(paths[0], 8, resample, cache)
+    second = _load_chw(paths[1], 8, resample, cache)
+    assert len(cache) == 1 and cache.bytes == 8 * 8 * 3
+    assert float(first.mean()) == pytest.approx(10 / 255) and float(second.mean()) == pytest.approx(
+        200 / 255
+    )
+
+
+@pytest.mark.unit
+def test_image_cache_missing_file_raises_instead_of_serving_stale(tmp_path):
+    path = _checker(tmp_path)
+    cache = ImageCache()
+    resample = _resample("bilinear", train=False)
+    _load_chw(path, 16, resample, cache)
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        _load_chw(path, 16, resample, cache)

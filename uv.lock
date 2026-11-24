@@ -2177,6 +2177,7 @@ source = { editable = "packages/tensor-factory-studio" }
 dependencies = [
     { name = "pillow" },
     { name = "tensor-factory" },
+    { name = "tensor-factory-mcp" },
     { name = "tensor-factory-synth" },
     { name = "tensor-factory-train" },
 ]
@@ -2195,6 +2196,7 @@ requires-dist = [
     { name = "onnxruntime", marker = "extra == 'serve'", specifier = ">=1.17" },
     { name = "pillow", specifier = ">=10" },
     { name = "tensor-factory", editable = "packages/tensor-factory" },
+    { name = "tensor-factory-mcp", editable = "packages/tensor-factory-mcp" },
     { name = "tensor-factory-synth", editable = "packages/tensor-factory-synth" },
     { name = "tensor-factory-synth", extras = ["gpu"], marker = "extra == 'autolabel'", editable = "packages/tensor-factory-synth" },
     { name = "tensor-factory-train", editable = "packages/tensor-factory-train" },

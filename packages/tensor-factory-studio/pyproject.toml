@@ -9,6 +9,7 @@ dependencies = [
     "tensor-factory",
     "tensor-factory-train",
     "tensor-factory-synth",
+    "tensor-factory-mcp",
     "pillow>=10",
 ]
 
@@ -39,3 +40,4 @@ packages = ["src/tensor_factory_studio"]
 tensor-factory = { workspace = true }
 tensor-factory-train = { workspace = true }
 tensor-factory-synth = { workspace = true }
+tensor-factory-mcp = { workspace = true }

@@ -14,7 +14,7 @@ while [ "$skip" -lt "$total" ]; do
   tmp="$(mktemp -d)"
   ( cd "$tmp" && PYTHONPATH="$repo/packages/tensor-factory-train/src:$repo/packages/tensor-factory/src" \
       "$py" "$here/tools/export_espdl.py" --size "$size" --onnx "$onnx" --calib "$calib" \
-      --calib-steps 100 --eval "$data" --jpegs 1000 --jpegs-skip "$skip" \
+      --calib-steps 100 --eval "$data" --jpegs 1000 --jpegs-budget 8500000 --jpegs-skip "$skip" \
       --jpegs-out "$here/main/models" --out model.espdl > export.log 2>&1 ) || { tail -5 "$tmp/export.log"; exit 1; }
   cp "$tmp/model.espdl" main/models/pets.espdl
   [ "$batch" -eq 0 ] && cp "$tmp/model.report.json" "$prefix-desktop.json"

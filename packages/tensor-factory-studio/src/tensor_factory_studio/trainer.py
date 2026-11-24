@@ -12,6 +12,12 @@ Label Studio pull) train alongside the frames labeled in the browser, read in pl
 Every round reports each source separately, so the live panel shows which data the model
 is good on and which it is not.
 
+The defaults are the shape that held up on a microcontroller (ESP32-P4): a 224 px input,
+four context blocks so the detector sees more than a 31 px window, and a training resize
+that mixes bilinear with nearest-neighbour so a runtime that can only subsample scores the
+same as the desktop. Decoded images are cached between rounds, so a retrain after one new
+label decodes one new file.
+
 torch is imported lazily in :meth:`run` so importing this module needs no ``serve`` extra.
 """
 
@@ -23,6 +29,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .dataset import Dataset
+
+NO_TORCH = (
+    "this backend cannot train (torch is not installed); the browser trains on WebGPU. "
+    "For backend training: uv sync --extra serve"
+)
 
 
 def _f(v) -> float | None:
@@ -36,8 +47,10 @@ class Trainer(threading.Thread):
         dataset: Dataset,
         models_dir: str | Path,
         *,
-        size: int = 480,
+        size: int = 224,
         width: int = 16,
+        context: int = 4,
+        resize: str = "mixed",
         epochs: int = 20,
         batch: int = 16,
         min_positives: int = 4,
@@ -51,6 +64,9 @@ class Trainer(threading.Thread):
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.size = size
         self.width = width
+        self.context = context
+        self.resize = resize
+        self._cache = None  # an ImageCache, made in run() (it needs numpy/torch's module)
         self.epochs = epochs
         self.batch = batch
         self.min_positives = min_positives
@@ -98,6 +114,8 @@ class Trainer(threading.Thread):
             self.ids_at_best = set()
             self.history = []
             self._metrics = {"phase": "idle", "status": "session cleared"}
+            if self._cache is not None:
+                self._cache.clear()
 
     def metrics(self) -> dict:
         with self._lock:
@@ -107,12 +125,30 @@ class Trainer(threading.Thread):
             m["bestErr"] = None if self.global_best == float("inf") else float(self.global_best)
             m["history"] = list(self.history)
             m["hasModel"] = self.served is not None
+            m["config"] = self.config()
             return m
+
+    def config(self) -> dict:
+        """What is being trained: shown in the panel and needed to read the numbers."""
+        return {
+            "size": self.size,
+            "width": self.width,
+            "context": self.context,
+            "resize": self.resize,
+        }
 
     # --- thread body ---
     def run(self) -> None:
-        from tensor_factory_train.train import fit, resolve_device  # heavy (torch)
+        try:
+            from tensor_factory_train.train import ImageCache, fit, resolve_device  # heavy (torch)
+        except ImportError:
+            # No torch here. The server still serves the UI (which trains in the browser on
+            # WebGPU) and still puts models on devices; it just cannot train by itself.
+            self.device = "none"
+            self._status(NO_TORCH)
+            return
 
+        self._cache = ImageCache()
         self.device = self._device_pref or resolve_device()
         self._status(f"idle on {self.device}")
         while not self._stop.is_set():
@@ -158,6 +194,9 @@ class Trainer(threading.Thread):
                 batch=self.batch,
                 size=self.size,
                 width=self.width,
+                context=self.context,
+                resize=self.resize,
+                cache=self._cache,
                 device=self._device_pref,
                 presence=True,
                 val_frac=0.2,
@@ -211,6 +250,8 @@ class Trainer(threading.Thread):
             "gain": _f(m["gain"]),
             "trainCount": int(m["train_count"]),
             "valCount": int(m["val_count"]),
+            # held-out frames that carry a box: the sample the error is measured on
+            "valBoxes": None if m.get("val_boxes") is None else int(m["val_boxes"]),
             "sources": [
                 {
                     "name": str(s["name"]),

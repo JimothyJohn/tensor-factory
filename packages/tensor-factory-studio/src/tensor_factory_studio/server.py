@@ -9,7 +9,14 @@ Routes:
   ``GET  /``, ``/<static>``  -> the Studio UI files
   ``GET  /metrics``          -> latest training metrics (polled by the UI)
   ``GET  /status``           -> device, running flag, dataset counts, class list
-  ``GET  /model``            -> download the served int8 ONNX
+  ``GET  /model``            -> download the served int8 ONNX; ``?format=p4`` the packed
+                                ESP32-P4 model image, ``?format=pyz`` the one-file edge.pyz
+  ``GET  /devices``          -> serial ports a board could be on, and whether the P4 tools exist
+  ``GET  /deploy``           -> state of the current / last deploy (polled by the UI)
+  ``POST /deploy?port=``     -> quantize the served model and write it to the P4 on that port
+  ``POST /model``            -> body = int8 ONNX trained in the browser; becomes the served model
+  ``POST /calib?i=``         -> body = one labeled frame from the browser (i = 0..63), kept to
+                                calibrate the P4 quantizer and to try on the board
   ``GET  /classes``          -> the ordered class list
   ``POST /samples?id&present&box&cls``  -> body = raw PNG; add/replace a labeled frame
   ``POST /classes``          -> body = {"classes": [...]}; set the ordered class list
@@ -31,7 +38,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from . import device
 from .dataset import Dataset
+from .device import Deployer, DeviceError
 from .trainer import Trainer
 
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
@@ -81,8 +90,110 @@ def _predict(
     }
 
 
+def _desktop_box(model_path: Path, jpeg: bytes, input_size: int) -> list[float] | None:
+    """The desktop model's box for a frame, to set beside the board's."""
+    import io
+
+    from PIL import Image
+
+    from tensor_factory.inference import Detector
+
+    det = Detector(model_path, input_size=input_size)
+    with Image.open(io.BytesIO(jpeg)) as im:
+        b = det.detect_box(im.convert("RGB"))
+    return [b.x1, b.y1, b.x2, b.y2]
+
+
+CALIB_FRAMES = 64  # frames a browser-trained model may bring along
+
+
+def _browser_frames(trainer: Trainer) -> Path:
+    """Where frames sent with a browser-trained model are kept (``POST /calib``)."""
+    return trainer.models_dir / "browser-frames"
+
+
+def _calib_dir(dataset: Dataset, trainer: Trainer) -> Path | None:
+    """Training images to calibrate the P4 quantizer with: the backend's own dataset, else
+    a source's, else the frames a browser-trained model brought along."""
+    for images in (
+        *(Path(root) / "images" for root in (dataset.root, *trainer.sources)),
+        _browser_frames(trainer),
+    ):
+        if images.is_dir() and any(images.iterdir()):
+            return images
+    return None
+
+
+def _probe_frame(dataset: Dataset, trainer: Trainer) -> bytes | None:
+    """One labeled frame to try on the board: the newest from the browser, else a source's."""
+    for fid in reversed(dataset.order):
+        if dataset.samples.get(fid, {}).get("present"):
+            path = dataset.images_dir / f"frame_{fid:05d}.png"
+            if path.is_file():
+                return path.read_bytes()
+    for root in trainer.sources:
+        images = Path(root) / "images"
+        if images.is_dir():
+            for path in sorted(images.iterdir()):
+                if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+                    return path.read_bytes()
+    first = _browser_frames(trainer) / "frame_00.png"
+    return first.read_bytes() if first.is_file() else None
+
+
+def make_deployer(dataset: Dataset, trainer: Trainer, input_size: int) -> Deployer:
+    return Deployer(
+        trainer.models_dir / "deploy",
+        size=input_size,
+        model=lambda: trainer.served,
+        calib_dir=lambda: _calib_dir(dataset, trainer),
+        probe=lambda: _probe_frame(dataset, trainer),
+        desktop_box=lambda onnx, jpeg: _desktop_box(onnx, jpeg, input_size),
+    )
+
+
+def adopt_model(trainer: Trainer, data: bytes, input_size: int) -> Path:
+    """Make ``data`` (an int8 detector ONNX) the served model; ``ValueError`` if it is not one.
+
+    Written beside the trainer's own checkpoints and swapped in with ``os.replace``, so a
+    half-written file is never served.
+    """
+    import os
+
+    from tensor_factory.inference import Detector
+    from tensor_factory.zerort import parse_model
+
+    try:
+        graph = parse_model(data).graph
+        if "image" not in graph.input_names or "box" not in graph.output_names:
+            raise ValueError("no image input or box output")
+        det = Detector("browser.onnx", input_size=input_size, model_bytes=data)
+        from PIL import Image
+
+        # one real inference: a model exported for another input size fails here, not later
+        det.detect_box(Image.new("RGB", (input_size, input_size)))
+    except Exception as exc:  # noqa: BLE001 -- any parse/load failure is the caller's bad file
+        raise ValueError(f"not a detector model: {type(exc).__name__}") from exc
+    trainer.models_dir.mkdir(parents=True, exist_ok=True)
+    tmp = trainer.models_dir / "browser.onnx.part"
+    final = trainer.models_dir / "browser.onnx"
+    tmp.write_bytes(data)
+    os.replace(tmp, final)
+    _detector.cache_clear()  # /predict caches by path; the file behind it just changed
+    trainer.served = final
+    return final
+
+
+_DOWNLOADS = {"onnx": "tinydetector.onnx", "p4": "tinydetector.p4.bin", "pyz": "edge.pyz"}
+
+
 def _make_handler(
-    dataset: Dataset, trainer: Trainer, ui_dir: Path, input_size: int, max_bytes: int
+    dataset: Dataset,
+    trainer: Trainer,
+    ui_dir: Path,
+    input_size: int,
+    max_bytes: int,
+    deployer: Deployer,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "tensor-factory-studio"
@@ -164,23 +275,118 @@ def _make_handler(
                         "hasModel": trainer.served is not None,
                         "counts": dataset.counts(),
                         "classes": list(dataset.classes),
+                        "config": trainer.config(),
+                        # the browser trains by itself unless there is data only we can read
+                        "sources": len(trainer.sources),
                     },
                 )
+            elif route == "/devices":
+                ready = device.p4_python() is not None
+                self._json(
+                    200,
+                    {
+                        "ports": device.ports(),
+                        "p4Tools": ready,
+                        "hint": "" if ready else device.P4_SETUP_HINT,
+                    },
+                )
+            elif route == "/deploy":
+                self._json(200, deployer.state())
             elif route == "/classes":
                 self._json(200, {"classes": list(dataset.classes)})
             elif route == "/model":
-                if trainer.served is None:
-                    self._json(404, {"error": "no model trained yet"})
-                    return
-                data = Path(trainer.served).read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Disposition", "attachment; filename=tinydetector.onnx")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                self._get_model()
             else:
                 self._serve_static(route)
+
+        def _get_model(self) -> None:
+            fmt = parse_qs(urlsplit(self.path).query).get("format", ["onnx"])[0]
+            if fmt not in _DOWNLOADS:
+                self._json(400, {"error": f"format must be one of {sorted(_DOWNLOADS)}"})
+                return
+            if trainer.served is None:
+                self._json(404, {"error": "no model trained yet"})
+                return
+            try:
+                if fmt == "p4":
+                    data = deployer.p4_image().read_bytes()
+                elif fmt == "pyz":
+                    data = deployer.pyz().read_bytes()
+                else:
+                    data = Path(trainer.served).read_bytes()
+            except DeviceError as exc:  # tools missing or the export failed: say what to do
+                self._json(503, {"error": str(exc)})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f"attachment; filename={_DOWNLOADS[fmt]}")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
+        def _post_model(self) -> None:
+            # A model trained in the browser (WebGPU), handed over so this machine can put
+            # it on a device. It is loaded before it replaces anything: bytes that are not
+            # a detector for this input size are refused and the served model stays.
+            body = self._read_body()
+            if body is None:
+                return
+            try:
+                adopt_model(trainer, body, input_size)
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            self._json(200, {"ok": True, "bytes": len(body)})
+
+        def _post_calib(self) -> None:
+            # Frames never leave the browser when it trains; these few do, on request, so
+            # the P4 quantizer sees real images instead of noise and the board has one
+            # frame to be checked on. Re-encoded here: what is stored is an image we wrote.
+            try:
+                i = int(parse_qs(urlsplit(self.path).query).get("i", [""])[0])
+            except ValueError:
+                i = -1
+            if not 0 <= i < CALIB_FRAMES:
+                self._json(400, {"error": f"i must be 0..{CALIB_FRAMES - 1}"})
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            import io
+
+            from PIL import Image
+
+            frames = _browser_frames(trainer)
+            try:
+                with Image.open(io.BytesIO(body)) as im:
+                    rgb = im.convert("RGB")
+            except Exception as exc:  # noqa: BLE001 -- not an image -> 400
+                self._json(400, {"error": f"not an image: {type(exc).__name__}"})
+                return
+            frames.mkdir(parents=True, exist_ok=True)
+            if i == 0:  # a new set: drop the previous model's frames
+                for old in frames.glob("frame_*.png"):
+                    old.unlink(missing_ok=True)
+            rgb.save(frames / f"frame_{i:02d}.png")
+            self._json(200, {"ok": True})
+
+        def _post_deploy(self) -> None:
+            port = parse_qs(urlsplit(self.path).query).get("port", [""])[0]
+            # Only a port this machine actually lists: the value reaches a subprocess argv.
+            if port not in device.ports():
+                self._json(400, {"error": "port must be one of the ports GET /devices lists"})
+                return
+            if trainer.served is None:
+                self._json(404, {"error": "no model trained yet"})
+                return
+            if device.p4_python() is None:
+                self._json(503, {"error": device.P4_SETUP_HINT})
+                return
+            if not deployer.start(port):
+                self._json(409, {"error": "a deploy is already running"})
+                return
+            self._json(202, deployer.state())
 
         def do_HEAD(self) -> None:  # noqa: N802
             self.do_GET()
@@ -195,6 +401,12 @@ def _make_handler(
                 self._post_autolabel()
             elif route == "/classes":
                 self._post_classes()
+            elif route == "/deploy":
+                self._post_deploy()
+            elif route == "/model":
+                self._post_model()
+            elif route == "/calib":
+                self._post_calib()
             elif route == "/reset":
                 dataset.clear()
                 trainer.reset()
@@ -319,7 +531,14 @@ def make_server(
     input_size: int,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> ThreadingHTTPServer:
-    handler = _make_handler(dataset, trainer, Path(ui_dir).resolve(), input_size, max_bytes)
+    handler = _make_handler(
+        dataset,
+        trainer,
+        Path(ui_dir).resolve(),
+        input_size,
+        max_bytes,
+        make_deployer(dataset, trainer, input_size),
+    )
     return _StudioServer((host, port), handler)
 
 
@@ -329,8 +548,10 @@ def serve(
     *,
     data_dir: str | Path | None = None,
     ui_dir: str | Path | None = None,
-    size: int = 480,
+    size: int = 224,
     width: int = 16,
+    context: int = 4,
+    resize: str = "mixed",
     epochs: int = 20,
     batch: int = 16,
     sources: Sequence[str | Path] = (),
@@ -355,6 +576,8 @@ def serve(
         data / "models",
         size=size,
         width=width,
+        context=context,
+        resize=resize,
         epochs=epochs,
         batch=batch,
         sources=sources,
@@ -398,8 +621,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8089)
     p.add_argument("--data-dir", default=None, help="dataset dir (default: <ui>/.data)")
     p.add_argument("--ui-dir", default=None, help="studio UI dir (default: repo studio/)")
-    p.add_argument("--size", type=int, default=480, help="square model input px")
+    p.add_argument("--size", type=int, default=224, help="square model input px")
     p.add_argument("--width", type=int, default=16, help="base channel width")
+    p.add_argument(
+        "--context",
+        type=int,
+        default=4,
+        help="extra 3x3 blocks that widen what the detector sees (0 = the original network)",
+    )
+    p.add_argument(
+        "--resize",
+        choices=("bilinear", "nearest", "mixed"),
+        default="mixed",
+        help="how training images are scaled; mixed suits both a desktop and a microcontroller",
+    )
     p.add_argument("--epochs", type=int, default=20, help="epochs per retrain round")
     p.add_argument("--batch", type=int, default=16)
     p.add_argument(
@@ -423,6 +658,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ui_dir=a.ui_dir,
         size=a.size,
         width=a.width,
+        context=a.context,
+        resize=a.resize,
         epochs=a.epochs,
         batch=a.batch,
         sources=a.source,

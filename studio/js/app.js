@@ -8,8 +8,10 @@ import { CanvasEditor } from "./canvas.js";
 import { installKeymap, renderKeymapHelp } from "./keymap.js";
 import { extractFrames } from "./video.js";
 import { exportDataset } from "./export.js";
-import { Trainer } from "./trainer.js";
+import { connect } from "./engine.js";
 import { sourceRows } from "./sources.js";
+import { CALIB_FRAMES, deployLine, Device, DOWNLOADS, howToUse, portOptions } from "./device.js";
+import { configLine, verdict } from "./verdict.js";
 import { toast } from "./toast.js";
 
 const PALETTE = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa"];
@@ -493,6 +495,10 @@ function renderMetrics(m) {
   $("mPresence").textContent = m.presenceAcc == null ? "—" : `${(m.presenceAcc * 100).toFixed(0)}%`;
   $("mGain").textContent = m.gain == null ? "—" : m.gain.toFixed(2);
   $("mEpoch").textContent = `${m.epoch} · ${m.trainCount}t/${m.valCount}v`;
+  const v = verdict(m);
+  $("verdict").className = `verdict ${v.tone}`;
+  $("verdict").textContent = v.text;
+  $("configLine").textContent = configLine(m.config);
   renderSources(m.sources, m.baseline);
   renderGuardrail(m);
   drawSparkline(m.history, m.bestErr, m.baseline);
@@ -516,6 +522,107 @@ function renderSources(sources, baseline) {
       return tr;
     }),
   );
+}
+
+// --- device panel -------------------------------------------------------------------
+function renderDevices(d) {
+  const select = $("devicePort");
+  const keep = select.value;
+  const opts = portOptions(d.ports);
+  select.replaceChildren(
+    ...opts.map((o) => {
+      const el = document.createElement("option");
+      el.value = o.value;
+      el.textContent = o.label; // a device path: text, never HTML
+      return el;
+    }),
+  );
+  if (opts.some((o) => o.value === keep)) select.value = keep;
+  $("deployBtn").disabled = !d.p4Tools || opts.length === 0;
+  if (!run.backend) setDeployStatus({ tone: "", text: NEEDS_HELPER });
+  else if (!d.p4Tools) setDeployStatus({ tone: "unsure", text: d.hint || "" });
+  else if (opts.length === 0) setDeployStatus({ tone: "", text: "No board found. Plug one in over USB." });
+}
+
+function setDeployStatus({ tone, text }) {
+  const el = $("deployStatus");
+  el.className = `deploy-status ${tone}`;
+  el.textContent = text;
+}
+
+function renderDeploy(state) {
+  setDeployStatus(deployLine(state));
+  $("deployBtn").disabled = state.state === "running";
+  if (state.state === "done") toast.success("Model is on the board.");
+  if (state.state === "error") toast.error(`Deploy: ${state.error}`);
+}
+
+const NEEDS_HELPER =
+  "That needs the local helper: run `uv run tensor-factory-studio` in the repo and open the page it prints.";
+
+// In browser mode the model lives in this page: hand it to the backend before asking the
+// backend to convert or flash it. Returns false (and says why) when that is not possible.
+async function shareModelWithBackend() {
+  if (run.mode !== "browser") return true;
+  if (!run.backend) {
+    toast.info(NEEDS_HELPER);
+    return false;
+  }
+  const bytes = await trainer.modelBytes();
+  if (!bytes) {
+    toast.info("No trained model yet — label a few frames first.");
+    return false;
+  }
+  await device.uploadModel(bytes, calibrationFrames());
+  return true;
+}
+
+// Labeled frames to send with the model: newest boxed frame first (it is the one tried on
+// the board), then a spread of the rest.
+function calibrationFrames() {
+  const boxed = state.frames.filter((f) => {
+    const l = state.labels.get(f.id);
+    return l && l.review === "approved" && l.present && l.boxes.length;
+  });
+  if (!boxed.length) return [];
+  const newest = boxed[boxed.length - 1];
+  const rest = boxed.slice(0, -1);
+  const step = Math.max(1, Math.floor(rest.length / (CALIB_FRAMES - 1)));
+  return [newest, ...rest.filter((_, i) => i % step === 0)].slice(0, CALIB_FRAMES).map((f) => f.blob);
+}
+
+async function modelFile(format) {
+  if (run.mode === "browser" && format === "onnx") {
+    const bytes = await trainer.modelBytes();
+    if (!bytes) throw new Error("no model trained yet");
+    return { blob: new Blob([bytes], { type: "application/octet-stream" }), name: DOWNLOADS.onnx.name };
+  }
+  return device.download(format);
+}
+
+async function downloadModel(format) {
+  $("downloadHint").textContent = format === "p4" ? "Preparing the board image…" : "";
+  try {
+    if (format !== "onnx" && !(await shareModelWithBackend())) {
+      $("downloadHint").textContent = "";
+      return;
+    }
+    const { blob, name } = await modelFile(format);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $("downloadHint").textContent = howToUse(format);
+    toast.success(`Model exported: ${DOWNLOADS[format].label} (${(blob.size / 1024).toFixed(0)} KB).`);
+  } catch (e) {
+    $("downloadHint").textContent = "";
+    if (/no model trained yet/.test(e.message)) {
+      toast.info("No trained model yet — label a few frames first.");
+    } else {
+      toast.error(`${DOWNLOADS[format].label}: ${e.message}`);
+    }
+  }
 }
 
 function renderGuardrail(m) {
@@ -588,6 +695,9 @@ function drawSparkline(history, best, baseline) {
 // --- boot ------------------------------------------------------------------
 let editor;
 let trainer;
+let device;
+// Where training runs ("browser" | "backend" | "none") and whether the local backend answers.
+const run = { mode: "none", backend: null };
 
 async function main() {
   state.store = await Store.create();
@@ -632,11 +742,11 @@ async function main() {
     }, 300);
   }).observe(wrap);
 
-  trainer = new Trainer({
+  const choice = await connect({
     onReady: (m) => {
       $("backendTag").textContent = m.backend;
-      toast.success(`Backend connected — training on ${m.backend.toUpperCase()}.`);
-      syncClasses(m.classes);
+      toast.success(choice.line);
+      if (run.mode === "backend") syncClasses(m.classes);
       trainer.resume();
     },
     onMetrics: renderMetrics,
@@ -647,11 +757,20 @@ async function main() {
     },
     onError: (text) => {
       // de-duped by the toast layer, so a failing poll loop shows one message, not 50
-      toast.error(`Backend: ${text}`);
-      $("backendTag").textContent = "offline";
+      toast.error(run.mode === "backend" ? `Backend: ${text}` : text);
+      if (run.mode === "backend") $("backendTag").textContent = "offline";
     },
   });
-  trainer.init();
+  trainer = choice.trainer;
+  run.mode = choice.mode;
+  run.backend = choice.backend;
+  $("modeLine").textContent = choice.line;
+  if (trainer) {
+    await trainer.init();
+  } else {
+    $("backendTag").textContent = "unavailable";
+    toast.error(choice.line);
+  }
 
   renderClasses();
   renderKeymapHelp($("keymapHelp"));
@@ -743,27 +862,26 @@ async function main() {
     e.target.value = "";
   });
   $("exportBtn").addEventListener("click", doExport);
-  $("exportModelBtn").addEventListener("click", async () => {
+  $("exportModelBtn").addEventListener("click", () => downloadModel("onnx"));
+  device = new Device({ onState: renderDeploy, onDevices: renderDevices });
+  // Without the local helper there is nothing to ask for ports (and no request to fail).
+  const refreshDevices = () => (run.backend ? device.refresh() : renderDevices({ ports: [], p4Tools: false }));
+  refreshDevices();
+  $("devicePort").addEventListener("focus", refreshDevices); // a board plugged in later
+  $("deployBtn").addEventListener("click", async () => {
+    const port = $("devicePort").value;
+    if (!port) return;
     try {
-      const res = await fetch("/model");
-      if (!res.ok) {
-        toast.info("No trained model yet — label a few frames first.");
-        return;
-      }
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "tinydetector.onnx";
-      a.click();
-      URL.revokeObjectURL(a.href);
-      const m = `Model exported (int8 ONNX, ${(blob.size / 1024).toFixed(0)} KB).`;
-      $("ingestStatus").textContent = m;
-      toast.success(m);
+      if (await shareModelWithBackend()) device.deploy(port);
     } catch (e) {
-      toast.error("Model export failed: " + e.message);
+      toast.error(`Deploy: ${e.message}`);
     }
   });
+  for (const btn of document.querySelectorAll(".downloads .link")) {
+    btn.addEventListener("click", () => downloadModel(btn.dataset.format));
+  }
   $("pauseBtn").addEventListener("click", () => {
+    if (!trainer) return;
     if (trainer.running) {
       trainer.pause();
       $("pauseBtn").textContent = "Resume training";
@@ -775,7 +893,7 @@ async function main() {
   $("clearBtn").addEventListener("click", async () => {
     if (!confirm("Wipe all frames and labels from this session?")) return;
     await state.store.clearAll();
-    trainer.reset();
+    trainer?.reset();
     revokeGalleryURLs();
     setAuto("");
     state.lastBox = null;
@@ -795,7 +913,7 @@ async function main() {
       if (s) approved.push(s);
     }
   }
-  trainer.upsert(approved);
+  trainer?.upsert(approved);
   await loadCurrent();
 }
 

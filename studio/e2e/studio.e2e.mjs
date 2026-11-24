@@ -41,7 +41,7 @@ try {
   await step("app boots and the backend connects", async () => {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     await page.waitForFunction(
-      () => /mps|cpu|cuda/.test(document.getElementById("backendTag").textContent),
+      () => /mps|cpu|cuda|webgpu/.test(document.getElementById("backendTag").textContent),
       null,
       { timeout: 15000 },
     );

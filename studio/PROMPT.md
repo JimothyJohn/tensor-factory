@@ -55,7 +55,14 @@ better (or worse) as you label.
      ran (and is in the git history), but WebGPU fell back to CPU in headless verification,
      tfjs was a standing exception to the repo's Python/Rust stack, and the in-browser model
      was *not* the deployable artifact. We pivoted to the backend approach.
-   - *Why the backend wins here:* it reuses the trusted `tensor_factory_train.fit` (torch on
+   - *2026-11-24, reversed:* training is back in the browser, on WebGPU, as the default;
+     the backend is an optional helper (flashing boards, GroundingDINO, `--source`). All
+     three objections were removed rather than accepted: headless Chromium gets a real
+     Metal adapter with `--enable-unsafe-webgpu --use-angle=metal`, so it is verified; the
+     trainer is hand-written WGSL, no tfjs; and the page writes the same int8 ONNX, with
+     bit-identical weights, that `tensor_factory_train.export_onnx` does. See
+     `README.md`, "The browser trainer is the same model".
+   - *Why the backend won at the time:* it reuses the trusted `tensor_factory_train.fit` (torch on
      MPS/CUDA), so the model the UI trains **is** the canonical int8 ONNX — no parity gap. It
      trains for real on the GPU, and the whole loop is verifiable locally end to end.
    - *Cost:* no longer "just a browser" — you run `uv run tensor-factory-studio` first. Worth
