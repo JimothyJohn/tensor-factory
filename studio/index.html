@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tensor Factory Studio</title>
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Tensor Factory <span>Studio</span></h1>
+      <div class="toolbar">
+        <label class="btn">
+          <input type="file" id="videoInput" accept="video/*" hidden />
+          Load video
+        </label>
+        <label class="field">fps <input id="fpsInput" type="number" min="0.1" step="0.1" value="1" /></label>
+        <label class="field" title="Minimum dHash bits (of 64) two frames must differ by to both be kept. Higher = more discriminatory, fewer near-duplicate frames.">dedup <input id="minDistInput" type="number" min="0" max="64" step="1" value="12" /></label>
+        <label
+          class="toggle"
+          title="Run the trained model on each new frame to pre-fill a box (you still confirm with Space/W). Off by default so unreviewed machine guesses never enter the dataset."
+        >
+          <input type="checkbox" id="autoLabelToggle" />
+          auto-label
+        </label>
+        <label
+          class="toggle"
+          title="GroundingDINO open-vocabulary auto-label — needs no trained model, primed by the previous frame's box (the server crops to that region). Type what to find. Requires the server's 'autolabel' extra."
+        >
+          <input type="checkbox" id="dinoToggle" />
+          dino
+        </label>
+        <input id="dinoPrompt" class="dino-prompt" type="text" placeholder="find e.g. helicoil" />
+        <button class="btn" id="exportBtn">Export dataset</button>
+        <button class="btn" id="exportModelBtn">Export model</button>
+        <button class="btn ghost" id="clearBtn">Clear session</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="stage">
+        <div class="canvas-wrap">
+          <canvas id="editor" width="760" height="760"></canvas>
+          <div id="emptyHint" class="empty-hint">
+            <strong>Load a video to start</strong>
+            <span>
+              Use <b>Load video</b> ↗. Frames too similar to ones already labeled are skipped
+              automatically. Then draw a box with the mouse and tap <span class="k">W</span> to
+              commit — <span class="k">A</span>/<span class="k">D</span> move between frames.
+            </span>
+          </div>
+        </div>
+        <div class="status-bar">
+          <span id="frameInfo">— / —</span>
+          <span id="stateBadges"></span>
+          <span id="counts" class="counts"></span>
+        </div>
+        <p id="autoBadge" class="auto-badge"></p>
+        <p id="ingestStatus" class="ingest-status"></p>
+        <div class="gallery-wrap">
+          <div class="gallery-head">
+            <span>Annotated</span><small id="galleryCount"></small>
+          </div>
+          <div id="gallery" class="gallery empty"></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="block">
+          <h2>Classes</h2>
+          <div id="classRow" class="class-row"></div>
+          <div class="class-edit">
+            <input id="newClassInput" type="text" placeholder="add a class…" maxlength="40" />
+            <button class="btn ghost" id="addClassBtn">+ add</button>
+            <label class="btn ghost" title="Load class names from a COCO annotations file">
+              import COCO
+              <input type="file" id="importClassesInput" accept=".json,application/json" hidden />
+            </label>
+          </div>
+        </div>
+
+        <div class="block">
+          <h2>Trainer <small id="backendTag">starting…</small></h2>
+          <div class="trainer">
+            <canvas id="sparkline" width="292" height="64"></canvas>
+            <div class="metrics">
+              <div class="metric"><span>val center-err</span><b id="mErr">—</b></div>
+              <div class="metric"><span>best</span><b id="mBest">—</b></div>
+              <div class="metric"><span>baseline floor</span><b id="mBaseline">—</b></div>
+              <div class="metric"><span>presence acc</span><b id="mPresence">—</b></div>
+              <div class="metric"><span>soft-argmax gain</span><b id="mGain">—</b></div>
+              <div class="metric"><span>epoch · data</span><b id="mEpoch">—</b></div>
+            </div>
+            <table id="sources" class="sources" hidden>
+              <thead>
+                <tr><th>source</th><th>train</th><th>val</th><th>err</th><th>presence</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div id="guardrail" class="guardrail"></div>
+            <button class="btn ghost" id="pauseBtn">Pause training</button>
+          </div>
+        </div>
+
+        <div class="block">
+          <h2>Keys <small>left hand · mouse draws</small></h2>
+          <div id="keymapHelp" class="keymap"></div>
+        </div>
+      </aside>
+    </main>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

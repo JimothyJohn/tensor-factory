@@ -7,14 +7,14 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
     "tensor-factory",
-    "pillow>=10",
+    "pillow>=12.3.0",
 ]
 
 [project.optional-dependencies]
 # Generation backend: hosted Gemini API (Nano Banana). Light, no GPU. Pull with
 # `uv sync --extra gemini`; needs a GEMINI_API_KEY in the environment.
 gemini = [
-    "google-genai>=1",
+    "google-genai>=2.18.1",
 ]
 # Auto-labeler (GroundingDINO) only. Heavy, GPU-shaped; NOT installed by default
 # `uv sync`. Pull with `uv sync --extra gpu` on a CUDA box or this Mac Studio's MPS.

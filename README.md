@@ -24,6 +24,48 @@ post-processing stays in 8-bit math.
 **Reference numbers (helicoils example):** 204 fps CPU @480px · 81 KB int8 model · ~1.9 px
 median localization on mock data (real photoreal data is the harder, open case).
 
+## The Studio — supervise, don't label
+
+[`studio/`](studio/) is the training UI, and the fastest way to go from a video to a
+deployed detector. The premise: **you orchestrate, the machine does the labor.**
+
+```sh
+uv sync --extra serve && uv run tensor-factory-studio   # http://127.0.0.1:8089
+```
+
+- **Drop in a video and the busywork is already gone.** Frames are sampled at your fps
+  and a perceptual-hash gate drops anything too similar to a frame you've already
+  labeled — near-duplicates never reach your screen.
+- **Nudge instead of drawing.** After a handful of boxes the trainer kicks in on its own
+  and keeps retraining as you go; every next frame arrives **pre-filled with the
+  model's current guess**. Most frames are a glance and a `Space`. When a guess is off,
+  drag the box into place and commit — that nudge is exactly the training signal the
+  model was missing.
+- **Bad samples get caught, not collected.** Machine guesses never enter the dataset
+  unconfirmed, and a guardrail watches validation error every round — when quality
+  regresses it points at the likely-bad samples, clickable, so you fix or drop them and
+  move on.
+- **What you walk away with is the real thing.** Export is the canonical int8 ONNX from
+  the same trainer that builds the repo's bundled models — the model you nudged is the
+  model you ship.
+
+The loop is reactive end to end: label → retrain → better pre-fills → less labeling.
+Your attention goes only where the model is still uncertain; everything else is one
+keypress. Full workflow and keymap: [`studio/README.md`](studio/README.md).
+
+## To the edge in one file
+
+```bash
+uv run tensor-factory-bundle --model model.onnx --out edge.pyz
+scp edge.pyz device: && ssh device python3 edge.pyz --host 0.0.0.0
+curl --data-binary @frame.png http://device:8088/detect
+```
+
+`edge.pyz` holds the runtime, the HTTP server and the model (about 100 KB). The device
+needs only Python: it uses onnxruntime when present and the built-in pure-Python engine
+when not. Replace the model file on a running device and the next request uses it. Details:
+[`packages/tensor-factory-mcp`](packages/tensor-factory-mcp#edge-the-whole-deployment-is-one-file).
+
 ## Examples
 
 - [`examples/helicoils`](examples/helicoils) — detecting coiled-wire threaded inserts in
@@ -39,6 +81,7 @@ median localization on mock data (real photoreal data is the harder, open case).
 | [`tensor-factory-train`](packages/tensor-factory-train) | Tiny soft-argmax detector → int8 ONNX |
 | [`tensor-factory-mcp`](packages/tensor-factory-mcp) | FastMCP server exposing the detector (bundled demo model) |
 | [`tensor-factory-label`](packages/tensor-factory-label) | Label Studio push/pull |
+| [`tensor-factory-studio`](packages/tensor-factory-studio) | Backend for the [Studio](studio/) training UI: dataset, continuous trainer, auto-label |
 
 ## Develop
 

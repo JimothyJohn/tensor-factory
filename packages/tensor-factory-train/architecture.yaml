@@ -1,0 +1,136 @@
+# tensor-factory TinyDetector — framework-agnostic architecture spec.
+#
+# A complete, dependency-free description of the stage-1 detector so it can be
+# reimplemented in any framework (PyTorch/TF/JAX/candle/ggml) or audited without
+# reading the training code. The source of truth is
+# packages/tensor-factory-train/src/tensor_factory_train/model.py; this file is kept
+# in lockstep with it. All shapes assume the default input size 480 and channel width 16.
+#
+# Design thesis: regress the four box edges *directly* by soft-argmax over per-edge
+# heatmaps — no anchor boxes, no width/height regression (which was the precision
+# bottleneck), no global pooling on the box path (spatial info must survive). One object
+# per image (or none, via the optional presence head). No class label, no background class.
+
+meta:
+  name: TinyDetector
+  task: single-object box regression (normalized xyxy), optional presence/objectness
+  parameters: width (channel multiplier `c`, default 16), presence (bool), learn_gain (bool)
+  reference_size_int8: ~81 KB at width=16          # measured, see repo CLAUDE.md
+  reference_throughput: ~190–204 fps CPU @ 480px    # onnxruntime, single thread
+  license: Apache-2.0
+
+input:
+  name: image
+  shape: [batch, 3, 480, 480]     # NCHW
+  dtype: float32
+  color: RGB
+  preprocessing:                  # exactly _load_chw() in train.py
+    - resize to 480x480, bilinear
+    - scale to [0, 1] by dividing by 255.0
+    - NO mean/std normalization
+    - channels-first (HWC -> CHW)
+
+# ── Backbone ────────────────────────────────────────────────────────────────
+# Four stride-2 conv blocks. Each block: Conv2d(3x3, stride 2, pad 1) -> BatchNorm2d
+# -> ReLU. Spatial halves each block; NO final global pool (the box head needs the
+# 30x30 grid intact). Channel counts are multiples of `c` (= width).
+backbone:
+  block_template: [conv2d_3x3_s2_p1, batchnorm2d, relu]
+  blocks:
+    - {in: 3,        out: c,       spatial_out: 240}   # 480 -> 240
+    - {in: c,        out: 2c,      spatial_out: 120}   # 240 -> 120
+    - {in: 2c,       out: 4c,      spatial_out: 60}    # 120 -> 60
+    - {in: 4c,       out: 4c,      spatial_out: 30}    #  60 -> 30
+  feature_map: [batch, 4c, 30, 30]   # at width=16: [batch, 64, 30, 30]
+
+# ── Box head (always present) ───────────────────────────────────────────────
+# 1x1 conv -> 4 heatmaps, one per edge channel in order (x1, y1, x2, y2). Each edge
+# is localized by a marginal soft-argmax (see algorithm below). Sub-pixel by
+# construction; no coordinate regression layer.
+box_head:
+  edge_heatmaps:
+    layer: conv2d(in=4c, out=4, kernel=1)
+    output: [batch, 4, 30, 30]      # channels = (x1, y1, x2, y2)
+  gain:
+    name: log_gain
+    shape: [1]
+    init: 0.0                       # gain = exp(log_gain) = 1.0 -> plain softmax at start
+    learnable: true                 # learn_gain=false -> frozen buffer at gain 1 (ablation)
+    role: >
+      inverse softmax temperature. A diffuse/multimodal heatmap's marginal expectation is
+      pulled toward 0.5 (image centre) -> centre-bias, the dominant real-data box error.
+      gain > 1 sharpens the heatmap before the expectation so it tracks the true peak.
+  output:
+    name: box
+    shape: [batch, 4]               # normalized xyxy in [0, 1], top-left origin
+    layout: [x1, y1, x2, y2]
+
+# ── Presence head (optional: presence=true; auto-on when training with negatives) ──
+# One global objectness logit. Pools the backbone feature map by BOTH mean and max
+# (concatenated), then a single linear layer. Mean alone washes out texture (a coil and a
+# smooth bore have near-identical channel means); max captures whether a discriminative
+# texture fires anywhere. sigmoid(logit) = P(target present).
+presence_head:
+  enabled_when: presence == true
+  pooling: concat[ global_mean_pool(feature_map), global_max_pool(feature_map) ]  # -> [batch, 8c]
+  layer: linear(in=8c, out=1)
+  output:
+    name: presence
+    shape: [batch, 1]               # raw logit; sigmoid() -> probability present
+  runtime_contract: >
+    threshold sigmoid(presence); when below threshold the runtime returns no box at all.
+
+# ── Marginal soft-argmax (the core algorithm — reimplement exactly) ─────────
+# Input:  heat (batch, 4, H, W);  gain scalar.  Output: (batch, 4) normalized xyxy.
+soft_argmax:
+  steps:
+    - prob = softmax(heat * gain) over the spatial H*W dims, per (batch, channel)
+    - "xs = linspace(0, 1, W); ys = linspace(0, 1, H)"
+    - edge_x[b,ch] = sum over x of ( sum over y of prob[b,ch,y,x] ) * xs[x]   # x-marginal expectation
+    - edge_y[b,ch] = sum over y of ( sum over x of prob[b,ch,y,x] ) * ys[y]   # y-marginal expectation
+    - "box = [ edge_x[:,0], edge_y[:,1], edge_x[:,2], edge_y[:,3] ]"          # x1,y1,x2,y2
+  note: x1/x2 read the x-marginal of channels 0/2; y1/y2 read the y-marginal of channels 1/3.
+
+forward:
+  presence_false: "box"                     # single output (back-compat with old exports)
+  presence_true:  "(box, presence_logit)"
+
+# ── Outputs & on-the-wire codec ─────────────────────────────────────────────
+outputs:
+  box: {shape: [batch, 4], range: "[0,1]", layout: xyxy}
+  presence: {shape: [batch, 1], note: "only when presence head enabled; raw logit"}
+codec:                                       # tensor_factory.codec — post-processing contract
+  box_serialized_as: 4 x uint8               # one byte per normalized coordinate
+  quantization_step_px: 1.88                 # 480 / 255; round-trip error < 1 px at 480
+  canonical_box: tensor_factory.geometry.BBox (normalized xyxy, top-left origin)
+
+# ── ONNX export / quantization (exactly export_onnx() in train.py) ──────────
+export:
+  format: ONNX
+  opset: 17
+  exporter: legacy TorchScript (dynamo=false)   # avoids the onnxscript dep; static tiny CNN
+  input_names: [image]
+  output_names: [box]                            # + [presence] when the presence head is on
+  dynamic_axes: {batch: 0}                        # on image + every output
+  quantization:
+    method: onnxruntime quantize_dynamic
+    weight_type: QUInt8                           # dynamic uint8 weight quantization
+    note: export on CPU (MPS ONNX export is unreliable), then quantize the fp32 graph.
+
+# ── Training recipe (defaults; tensor-factory-train fit) ────────────────────
+training:
+  optimizer: Adam
+  lr: 1.0e-3
+  batch: 16
+  epochs: 10                                   # default; real runs use more
+  box_loss: SmoothL1 on predicted vs gt xyxy
+  presence_loss: BCEWithLogits on objectness (box loss masked for no-object negatives)
+  loss_weights: {box_weight: 1.0, presence_weight: 1.0}
+  augment: optional horizontal flip
+  device_resolution: cuda -> mps -> cpu
+  val_metric: median center-error in px (over a seeded held-out --val-frac split)
+  checkpoint_selection: best (presence accuracy, then center error)
+  localization_guardrail: >
+    val output reports the constant-predictor baseline (median center-error of always
+    emitting the mean train-box center) and a verdict. A model at/above this floor is not
+    localizing — it is riding centre-bias. See tensor_factory_train.data.baseline_center_err.

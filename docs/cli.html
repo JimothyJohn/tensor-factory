@@ -9,9 +9,6 @@
 <script>
   try { if (localStorage.getItem("tf-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark"); } catch (e) {}
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800;900&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -68,6 +65,7 @@
             <tr><td><code>tensor-factory-label</code></td><td>tensor-factory-label</td><td>Label Studio push/pull</td></tr>
             <tr><td><code>tensor-factory-mcp</code></td><td>tensor-factory-mcp</td><td>MCP server (stdio)</td></tr>
             <tr><td><code>tensor-factory-http</code></td><td>tensor-factory-mcp</td><td>HTTP detection endpoint</td></tr>
+            <tr><td><code>tensor-factory-bundle</code></td><td>tensor-factory-mcp</td><td>pack runtime + server + model into one file for the edge</td></tr>
           </tbody>
         </table>
       </section>
@@ -100,6 +98,26 @@
             <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
           </tbody>
         </table>
+
+        <h3>store</h3>
+        <p>Push and pull models and datasets to a private S3 bucket. Pure standard library, so a device with nothing but Python can pull a model. Every file is stored once under its sha256; a pulled file is verified and then moved into place in one step, which is what a running server's hot reload picks up.</p>
+        <div class="sig">tensor-factory store [--store s3://bucket[/prefix]] ACTION …</div>
+        <table>
+          <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>push-model PATH [--name N]</code></td><td>upload a model and print its sha256; the name defaults to the file stem</td></tr>
+            <tr><td><code>pull-model REF --out PATH</code></td><td>download by sha256 or by name, verified; the old file stays if verification fails</td></tr>
+            <tr><td><code>push-dataset DIR [--name N]</code></td><td>upload every file under a dataset directory (links are not followed)</td></tr>
+            <tr><td><code>pull-dataset NAME --out DIR</code></td><td>restore a dataset; files already present and intact are skipped</td></tr>
+            <tr><td><code>ls [PREFIX]</code></td><td>list what is stored, e.g. <code>models/</code> or <code>datasets/</code></td></tr>
+          </tbody>
+        </table>
+<pre>scripts/store_bucket.sh                                  <span class="c"># once: creates the private bucket, prints TENSOR_FACTORY_STORE=…</span>
+tensor-factory store push-model model.onnx               <span class="c"># prints the sha256</span>
+tensor-factory store push-dataset examples/helicoils/images/real
+
+<span class="c"># on the device, with only the edge bundle and read-only AWS keys in the environment</span>
+PYTHONPATH=edge.pyz python3 -m tensor_factory.cli store pull-model SHA256 --out model.onnx</pre>
       </section>
 
       <section id="synth">
@@ -163,11 +181,11 @@
       <section id="train">
         <h2>tensor-factory-train</h2>
         <p>One subcommand: <code>fit</code> — train on a COCO dataset and export an int8 ONNX model.</p>
-        <div class="sig">tensor-factory-train fit --data DIR [--out model.onnx] [options]</div>
+        <div class="sig">tensor-factory-train fit --data DIR [DIR ...] [--out model.onnx] [options]</div>
         <table>
           <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
           <tbody>
-            <tr><td><code>--data</code></td><td>—  (required)</td><td>dataset dir (<code>annotations.coco.json</code> + images)</td></tr>
+            <tr><td><code>--data</code></td><td>—  (required)</td><td>one or more dataset dirs (<code>annotations.coco.json</code> + images). Several train as one set, read in place; classes merge by name, part of each is held out, and each is scored separately</td></tr>
             <tr><td><code>--out</code></td><td><code>model.onnx</code></td><td>output ONNX path</td></tr>
             <tr><td><code>--epochs</code></td><td><code>10</code></td><td>training epochs</td></tr>
             <tr><td><code>--batch</code></td><td><code>16</code></td><td>batch size</td></tr>
@@ -242,7 +260,7 @@
       <section id="http">
         <h2>tensor-factory-http</h2>
         <p>Stdlib <code>http.server</code> endpoint over the same core inference. Binds loopback by default.</p>
-        <div class="sig">tensor-factory-http [--host 127.0.0.1] [--port 8088] [--model PATH] [--input-size 480] [--max-mb 25]</div>
+        <div class="sig">tensor-factory-http [--host 127.0.0.1] [--port 8088] [--model PATH] [--input-size 480] [--engine auto] [--max-mb 25]</div>
         <table>
           <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
           <tbody>
@@ -250,6 +268,7 @@
             <tr><td><code>--port</code></td><td><code>8088</code></td><td>bind port (<code>0</code> = ephemeral)</td></tr>
             <tr><td><code>--model</code></td><td>bundled</td><td>ONNX model path</td></tr>
             <tr><td><code>--input-size</code></td><td><code>480</code></td><td>square model input (px)</td></tr>
+            <tr><td><code>--engine</code></td><td><code>auto</code></td><td><code>ort</code> (onnxruntime), <code>zerort</code> (pure standard library), or <code>auto</code>: onnxruntime when installed, zerort otherwise</td></tr>
             <tr><td><code>--max-mb</code></td><td><code>25</code></td><td>reject request bodies larger than this</td></tr>
           </tbody>
         </table>
@@ -257,11 +276,30 @@
           <thead><tr><th>Route</th><th>Response</th></tr></thead>
           <tbody>
             <tr><td><code>GET /health</code></td><td><code>{"status":"ok"}</code></td></tr>
-            <tr><td><code>GET /model_info</code></td><td>model path, input size, IO name, ORT providers</td></tr>
+            <tr><td><code>GET /model_info</code></td><td>model path, <code>sha256</code> and size of the loaded model, input size, IO name, engine, providers; <code>reload_error</code> if a model swap failed</td></tr>
             <tr><td><code>POST /detect</code></td><td>body = raw image bytes → the same JSON as the MCP <code>detect</code> tool</td></tr>
           </tbody>
         </table>
         <p>Bad image bytes → <code>400</code>; missing <code>Content-Length</code> → <code>411</code>; empty body → <code>400</code>; over <code>--max-mb</code> → <code>413</code>; unknown route → <code>404</code>.</p>
+        <p>The model file is re-checked on every request. Replace it (write the new file beside it, then <code>mv</code> it over) and the next request runs the new model with no restart. A replacement that does not load leaves the previous model serving.</p>
+      </section>
+
+      <section id="bundle">
+        <h2>tensor-factory-bundle</h2>
+        <p>Packs the runtime, the HTTP server and a model into one runnable file (about 100 KB). The device needs Python 3.11 or newer and nothing else; it uses onnxruntime when installed and the built-in pure-Python engine otherwise.</p>
+        <div class="sig">tensor-factory-bundle [--model PATH] [--out edge.pyz] [--input-size 480]</div>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--model</code></td><td>bundled</td><td>ONNX or <code>.tfm</code> model to pack; checked to load before anything is written</td></tr>
+            <tr><td><code>--out</code></td><td><code>edge.pyz</code></td><td>output file</td></tr>
+            <tr><td><code>--input-size</code></td><td><code>480</code></td><td>square model input (px), recorded in the bundle</td></tr>
+          </tbody>
+        </table>
+<pre>tensor-factory-bundle --model model.onnx --out edge.pyz
+scp edge.pyz device:
+ssh device python3 edge.pyz --host 0.0.0.0 --port 8088   <span class="c"># any tensor-factory-http flag works</span>
+curl http://device:8088/model_info                       <span class="c"># sha256 matches what the build printed</span></pre>
       </section>
 
       <section id="quickstart">
@@ -297,6 +335,9 @@
           <tbody>
             <tr><td><code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code></td><td>Nano Banana generation</td></tr>
             <tr><td><code>LABEL_STUDIO_URL</code> / <code>LABEL_STUDIO_API_KEY</code></td><td>Label Studio push/pull</td></tr>
+            <tr><td><code>TENSOR_FACTORY_STORE</code></td><td><code>tensor-factory store</code>: <code>s3://bucket[/prefix]</code></td></tr>
+            <tr><td><code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> / <code>AWS_SESSION_TOKEN</code>, <code>AWS_REGION</code></td><td><code>tensor-factory store</code> credentials and region (default <code>us-east-1</code>)</td></tr>
+            <tr><td><code>TENSOR_FACTORY_STORE_ENDPOINT</code></td><td>optional S3-compatible endpoint for <code>tensor-factory store</code></td></tr>
             <tr><td><code>UV_PUBLISH_TOKEN</code></td><td><code>./Quickstart -p</code> publish</td></tr>
             <tr><td><code>PYTORCH_ENABLE_MPS_FALLBACK</code></td><td>set automatically by the auto-labeler for MPS</td></tr>
           </tbody>
@@ -314,6 +355,7 @@
       <a href="#label">…-label</a>
       <a href="#mcp">…-mcp</a>
       <a href="#http">…-http</a>
+      <a href="#bundle">…-bundle</a>
       <a href="#quickstart">./Quickstart</a>
       <a href="#extras">Install extras</a>
     </nav>

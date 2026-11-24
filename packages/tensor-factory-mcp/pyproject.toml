@@ -7,13 +7,14 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
     "tensor-factory[infer]",
-    "mcp>=1.28.1",
+    "mcp>=2.0.0",
     "pydantic>=2",
 ]
 
 [project.scripts]
 tensor-factory-mcp = "tensor_factory_mcp.server:main"
 tensor-factory-http = "tensor_factory_mcp.http_server:main"
+tensor-factory-bundle = "tensor_factory_mcp.bundle:main"
 
 [build-system]
 requires = ["hatchling"]

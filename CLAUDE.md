@@ -27,10 +27,38 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   `helicoil-mock-v1.onnx` is still bundled alongside it (box-only, selectable via
   `model_path`); earlier synthetic/photoreal models (v1–v5) live gitignored under
   `examples/helicoils/images/`.
+- **Zero-dependency inference floor (`tensor_factory.zerort`).** A pure-stdlib runtime —
+  protobuf wire-format reader (plus the flat `.tfm` container, `tensor-factory pack`),
+  the int8 op set (bigint-SIMD ConvInteger), PNG/baseline-JPEG/PPM decoding, triangle
+  resize — so image → detection (and HTTP serving via `tensor-factory-http`) runs on
+  bare CPython with **no third-party packages**. `Detector(engine="auto")` uses
+  onnxruntime when the `infer` extra is installed (~215 fps) and falls back to zerort
+  otherwise (~0.9 fps); parity vs onnxruntime is pinned by tests (op-level exact for
+  integer kernels; full-model ≤5e-3; import-blocked subprocess proofs) and CI runs the
+  whole stack in a bare `python:3.12-slim` container
+  (`scripts/portability_check.py`). Plan + status: [`ROADMAP.md`](ROADMAP.md).
 - **Two serving surfaces.** `tensor-factory-mcp` (stdio MCP) and `tensor-factory-http` (a
   stdlib `http.server` endpoint, zero extra deps) both wrap the same `core` inference:
   `POST /detect` takes raw image bytes → the same JSON as the MCP `detect` tool. HTTP binds
   `127.0.0.1` by default.
+- **Edge = one file.** `tensor-factory-bundle --model M --out edge.pyz` packs
+  `tensor_factory` (zerort included), the stdlib HTTP server and the model into a
+  reproducible zipapp (~100 KB); `python3 edge.pyz` on a bare CPython ≥ 3.11 serves
+  `/detect`. The model is unpacked to `~/.cache/tensor-factory/` (sha256-verified each
+  start). `scripts/portability_check.py` step 5 builds and runs one with `-S -I`, and the
+  CI `portability` job runs it on x86-64 and aarch64 Linux.
+- **S3 store (`tensor_factory.store`, `tensor-factory store`).** Models and datasets are
+  pushed to and pulled from one private bucket, content-addressed by sha256
+  (`blobs/sha256/<hex>`, `models/<name>.json`, `datasets/<name>/manifest.json`). Pure
+  stdlib (SigV4 over `urllib`), so it ships inside `edge.pyz` and a bare-Python device can
+  pull a model by sha256; a pull is verified, then `os.replace`d, which hot reload picks
+  up. `scripts/store_bucket.sh` creates or re-asserts the bucket (public access blocked,
+  TLS-only, versioned, lifecycle rules). Config: `TENSOR_FACTORY_STORE=s3://…` plus the
+  usual `AWS_*` variables. The real-bucket tests are `-m integration` and skip without it.
+- **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
+  the file (atomically: write beside, `mv` over) and the next request loads it. A
+  replacement that fails to load keeps the old model serving; `/model_info` reports
+  `sha256` of what is loaded and `reload_error` when a swap failed.
 - **Presence head / negatives.** The detector returns one box or none, YOLO-style. A single
   objectness logit (`TinyDetector(presence=True)`, ONNX output `presence`) is trained by
   `--negatives DIR`: positives → objectness 1, no-object negatives → objectness 0 with box
@@ -51,6 +79,15 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   real negatives — trains the bundled `cam-v1`), `real_ds` (110 human-validated synthetic
   positives), `real_ds_more` (168 reference-conditioned, GroundingDINO-labeled),
   `negatives_pool` (110 synthetic negatives), `real_ds_combined` (278, used to train v3).
+- **Several data sources train as one set.** `tensor-factory-train fit --data A B C` (and
+  `fit([A, B, C], ...)`) reads each dataset dir in place, merges classes by name, holds
+  `--val-frac` out of *each* source and reports each separately; negatives dirs count as
+  sources. The Studio takes `--source DIR` (repeatable) to train prior datasets alongside
+  the frames labeled in the browser — with a source given it trains a first model before
+  anything is labeled — and its trainer panel shows the per-source table every epoch.
+- **Training tests need torch, which the `gate` job does not install.** The `train` CI job
+  (macOS runner, `--extra train --extra serve`) runs them; locally:
+  `uv run --all-packages --extra train --extra serve python -m pytest packages/tensor-factory-train packages/tensor-factory-studio -m "unit or integration"`.
 - **Human-review gate is optional.** Training enforces `review=approved` by default, but
   `--allow-unreviewed` trains straight on GroundingDINO labels — the fast path (QC a
   contact-sheet instead of hand-correcting every box). The prompt system + QC samples are

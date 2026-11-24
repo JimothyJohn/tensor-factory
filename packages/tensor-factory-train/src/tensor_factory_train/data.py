@@ -11,6 +11,8 @@ unvalidated labels).
 from __future__ import annotations
 
 import json
+import statistics
+from collections.abc import Sequence
 from pathlib import Path
 
 from tensor_factory.formats import from_coco_bbox
@@ -73,6 +75,84 @@ def load_coco_labeled(
         box = from_coco_bbox(ann["bbox"], width=im["width"], height=im["height"])
         items.append((root / im["file_name"], box, label_of[ann["category_id"]]))
     return items, names
+
+
+def source_names(dirs: Sequence[str | Path]) -> list[str]:
+    """One short display name per source directory: its basename, de-duplicated.
+
+    Two sources that share a basename (``a/frames`` and ``b/frames``) become ``frames``
+    and ``frames-2`` so per-source metrics never merge two different datasets.
+    """
+    names: list[str] = []
+    for d in dirs:
+        base = Path(d).resolve().name or "data"
+        name, n = base, 1
+        while name in names:
+            n += 1
+            name = f"{base}-{n}"
+        names.append(name)
+    return names
+
+
+def load_sources(
+    data_dirs: Sequence[str | Path],
+    *,
+    require_review: bool = True,
+) -> tuple[list[tuple[Path, BBox, int, int]], list[str]]:
+    """Load several COCO dataset dirs as one training set, without copying images.
+
+    Returns ``(image_path, BBox, label, source)`` items plus the merged class names.
+    ``source`` is the index of the directory the item came from, in ``data_dirs`` order.
+    Classes are merged **by name** in first-seen order, so two sources that both call
+    their object ``helicoil`` share one class id even when their COCO category ids differ,
+    and a source that adds a new name extends the list rather than colliding with an id.
+    """
+    names: list[str] = []
+    items: list[tuple[Path, BBox, int, int]] = []
+    for src, d in enumerate(data_dirs):
+        root = Path(d)
+        labeled, local = load_coco_labeled(
+            root / "annotations.coco.json", root, require_review=require_review
+        )
+        for n in local:
+            if n not in names:
+                names.append(n)
+        remap = [names.index(n) for n in local]
+        items.extend((path, box, remap[lbl], src) for path, box, lbl in labeled)
+    return items, names
+
+
+def baseline_center_err(
+    train_items: Sequence[tuple],
+    val_items: Sequence[tuple],
+    size: int,
+) -> float | None:
+    """Median center error (px) of the *constant predictor*: always emit the mean
+    training-box center, ignoring the image entirely. The floor any real localizer must beat.
+
+    A model scoring at or above this isn't localizing -- it's riding center-bias (the
+    soft-argmax marginal expectation collapses toward the frame center when the heatmap is
+    diffuse). Reported next to the model's val error so the two can never be confused: in
+    ``examples/pets-validation`` a 61px model sat *above* its ~60px baseline -- i.e. learned
+    no localization -- while a superficially-trained loss curve hid it. The constant is fit
+    on the *train* split and scored on *val*, matching the model's own train/val protocol.
+
+    Returns None when either split has no box-bearing item (no comparison possible). Items
+    may carry ``None`` boxes (negatives); those are skipped.
+    """
+
+    def center(b: BBox) -> tuple[float, float]:
+        return (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
+
+    # Items may be (path, box) or (path, box, label) -- index the box, don't unpack.
+    train_c = [center(it[1]) for it in train_items if it[1] is not None]
+    val_c = [center(it[1]) for it in val_items if it[1] is not None]
+    if not train_c or not val_c:
+        return None
+    mcx = sum(cx for cx, _ in train_c) / len(train_c)
+    mcy = sum(cy for _, cy in train_c) / len(train_c)
+    errs = [((mcx - cx) ** 2 + (mcy - cy) ** 2) ** 0.5 * size for cx, cy in val_c]
+    return statistics.median(errs)
 
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
