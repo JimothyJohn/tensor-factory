@@ -41,9 +41,9 @@ import torch  # ty: ignore[import-not-found]
 from torch import nn  # ty: ignore[import-not-found]
 
 
-def _block(in_ch: int, out_ch: int) -> nn.Module:
+def _block(in_ch: int, out_ch: int, stride: int = 2) -> nn.Module:
     return nn.Sequential(
-        nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=2, padding=1),
+        nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1),
         nn.BatchNorm2d(out_ch),
         nn.ReLU(inplace=True),
     )
@@ -74,9 +74,13 @@ class TinyDetector(nn.Module):
         presence: bool = False,
         learn_gain: bool = True,
         num_classes: int = 1,
+        context: int = 0,
     ) -> None:
         super().__init__()
+        if context < 0:
+            raise ValueError(f"context must be >= 0, got {context}")
         c = width
+        self.context = context
         self.presence = presence
         self.num_classes = num_classes
         # 480 -> 240 -> 120 -> 60 -> 30 (4 stride-2 blocks, no final pool).
@@ -85,6 +89,12 @@ class TinyDetector(nn.Module):
             _block(c, 2 * c),
             _block(2 * c, 4 * c),
             _block(4 * c, 4 * c),
+            # Optional context blocks: 3x3, stride 1, at the coarsest resolution. Four
+            # stride-2 blocks alone see a 31 px window, which is enough for a part that fills
+            # a fixed view but not for an object of varying size; each context block widens
+            # the window by 32 px without making the heatmap coarser. Appended after the
+            # original four so their parameter names, and old checkpoints, are unchanged.
+            *(_block(4 * c, 4 * c, stride=1) for _ in range(context)),
         )
         # One heatmap per edge: channels are (x1, y1, x2, y2).
         self.heat = nn.Conv2d(4 * c, 4, kernel_size=1)

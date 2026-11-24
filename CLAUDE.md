@@ -60,7 +60,8 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   static int8 `.espdl` model on ESP-DL. `tools/export_espdl.py` (ESP-PPQ, in its own venv)
   quantizes the convolutional graph from any exported detector ONNX; the soft-argmax is done
   in firmware. Measured on the board: `cam-v1` at 480 px in 76 ms a frame, a 160 px retrain
-  in 7.8 ms, both bit-identical to the desktop int8 graph. No camera pipeline yet. Commands
+  in 7.8 ms, both bit-identical to the desktop int8 graph; a JPEG file to a box in 70 ms. The board
+  has no camera. Commands
   and numbers: [`firmware/esp32-p4/README.md`](firmware/esp32-p4/README.md).
 - **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
   the file (atomically: write beside, `mv` over) and the next request loads it. A
@@ -72,6 +73,17 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   loss masked. `detect` thresholds `sigmoid(presence)` and returns `present` (bool) + `score`;
   when absent the box fields come back `null`. No class label, no `background` class.
   `gen_negatives.py` synthesizes machined-part negatives.
+- **Context blocks (`--context N`, `TinyDetector(context=N)`).** Extra 3x3 stride-1 blocks
+  after the four downsampling ones; each widens what a heatmap cell sees by 32 px (31 px
+  with none) without coarsening the heatmap. Default 0, so existing models are unchanged.
+  It is what lets the detector work beyond a part filling a fixed view: on Oxford-IIIT Pet
+  head boxes, held-out center error went from no better than the average box to 10.7 px at
+  224 px with `--context 4`.
+- **Training resize (`--resize bilinear|nearest|mixed`).** How training images are scaled to
+  `--size`; default `bilinear`, as before. A runtime that can only subsample (ESP-DL on the
+  P4) sees different pixels, which cost 0.047 IoU on Oxford-IIIT Pet. `mixed` picks one of
+  the two per sample: the board then scores 0.618 against the desktop's 0.629, and the
+  model is better on the desktop too. Desktop inference (`Detector`) still resizes bilinear.
 - **Soft-argmax gain (localization).** The coordinate head carries a learnable inverse-
   softmax-temperature (`TinyDetector.log_gain`) so it can sharpen a diffuse heatmap before
   the marginal expectation, countering the centre-bias that dominates real-data box error.

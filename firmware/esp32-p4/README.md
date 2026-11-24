@@ -102,34 +102,44 @@ On the 20% held out during retraining (about 26 frames with a helicoil, one seed
 error in 480-px units was 41.7 / 31.5 / 43.5 / 45.0 px at 480 / 320 / 224 / 160 px and
 presence 98 / 98 / 93 / 95%. That is too few frames to rank the sizes.
 
-**Image files as bytes** (2026-11-24). All 432 held-out Oxford-IIIT Pet test photos,
-original JPEG files embedded untouched (mean 100 KB, 0.17 megapixel), 224 px model. The
-board decodes, resizes and detects each one itself:
+**Image files as bytes, on an open detection dataset** (2026-11-24). Oxford-IIIT Pet head
+boxes: trained on 3,238 photos, tested on 432 the model never saw. The test photos are
+embedded as their original JPEG files (mean 100 KB, 0.17 megapixel); the board decodes,
+resizes and detects each one itself. Model: 224 px, width 16, `--context 4`.
+Raw output: `results/pets-224-c4-*` (bilinear) and `results/pets-224-c4-mixed-*`.
 
 | Stage | Mean time |
 |---|---|
 | JPEG decode (software) | 56.3 ms (about 330 ms per megapixel) |
 | Resize + quantize into the model input | 2.4 ms |
-| Network | 11.4 ms |
+| Network | 15.5 ms |
 | Box decode | 0.5 ms |
-| **File to box** | **70.6 ms mean, 75 ms median, 96 ms at the 95th percentile, 375 ms worst** (a 1600x1200 photo) |
+| **File to box** | **74.7 ms mean, 379 ms worst** (a 1600x1200 photo) |
 
+| On the 430 files that decoded | Mean IoU | Boxes with IoU >= 0.5 | Median center error |
+|---|---|---|---|
+| Trained on bilinear resize: desktop, int8 | 0.593 | 71.9% | 5.2% of the image |
+| Trained on bilinear resize: board | 0.546 | 63.7% | 5.4% of the image |
+| **Trained with `--resize mixed`: desktop, int8** | **0.629** | **78.1%** | **4.7% of the image** |
+| **Trained with `--resize mixed`: board, from the JPEG file** | **0.618** | **73.5%** | **4.8% of the image** |
+
+- ESP-DL resizes by nearest neighbour; the detector used to be trained on bilinear only,
+  and that mismatch cost the board 0.047 IoU (the desktop lost the same when made to resize
+  the same way: 0.552). `--resize mixed` trains on both, picked per sample. It closes the
+  gap to 0.011 and is also the better model on the desktop. Timings above are unchanged.
+  What remains is the JPEG decoder and the exact sampling positions, which differ between
+  PIL and ESP-DL. Float and int8 agree to within 0.4 px.
 - 430 of 432 files decoded. The two that did not are progressive JPEGs, which ESP-DL's
   software decoder does not take.
 - The chip's hardware JPEG decoder took only 26 of 432: it refuses any picture whose width
   or height is not a multiple of 8. On files it accepts it is about 9x faster. Twenty of the
-  same photos re-encoded at 480x320: 3.8 ms hardware against 33.6 ms software, 18 ms file
-  to box (`results/jpeg-decoders-480x320-20261124.txt`).
-- Accuracy on this dataset is **not a result**: the tiny detector does not learn pet heads.
-  Two trainings (width 16 for 40 epochs, width 32 for 100) both ended no better than always
-  predicting the average box on held-out images (26.7 and 27.1 px against 24.8 px at 224 px),
-  on the desktop in float, before the board is involved. What the run does show is that the
-  board tracks the desktop: mean IoU against the labels 0.283 on the board and 0.289 on the
-  desktop over the same 430 files.
-- Per file the board's box and the desktop's overlap by 0.67 IoU on average, not 1.0 as
-  with raw frames. The decoders differ and ESP-DL resizes by nearest neighbour where
-  training uses bilinear. With a model this unsure of itself that is an upper bound on the
-  preprocessing effect, not a measurement of it.
+  same photos re-encoded at 480x320: 3.8 ms hardware against 33.6 ms software
+  (`results/jpeg-decoders-480x320-20261124.txt`).
+- Depth is what made this work. The original four-layer detector (a 31 px window) never
+  beat the average box on held-out pet photos (26.7 px against 24.8 px, and 27.1 px at
+  double width). Four context blocks widen the window to 159 px: 10.7 px held out, for
+  4 ms more network time. `results/pets-224-w16-*` is the failed model's run, kept for
+  comparison.
 
 For scale, Espressif's stock YOLO11n COCO detector (640 px, multi-object) on the same board:
 62 ms to decode its 405x540 test JPEG, 1,462 ms per detection pass, same four boxes as

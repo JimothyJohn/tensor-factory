@@ -39,12 +39,13 @@ _EXTS = {".png", ".jpg", ".jpeg"}
 class DeviceGraph(nn.Module):
     """The detector minus the soft-argmax: image -> (heat [1,4,h,w], presence [1,1])."""
 
-    def __init__(self, width: int = 16) -> None:
+    def __init__(self, width: int = 16, context: int = 0) -> None:
         super().__init__()
-        chans = [3, width, 2 * width, 4 * width, 4 * width]
+        chans = [3, width, 2 * width, 4 * width, 4 * width] + [4 * width] * context
         layers: list[nn.Module] = []
-        for cin, cout in zip(chans, chans[1:], strict=False):
-            layers += [nn.Conv2d(cin, cout, 3, stride=2, padding=1), nn.ReLU()]
+        for i, (cin, cout) in enumerate(zip(chans, chans[1:], strict=False)):
+            # four downsampling blocks, then the optional stride-1 context blocks
+            layers += [nn.Conv2d(cin, cout, 3, stride=2 if i < 4 else 1, padding=1), nn.ReLU()]
         self.features = nn.Sequential(*layers)
         self.heat = nn.Conv2d(4 * width, 4, 1)
         self.presence_head = nn.Linear(8 * width, 1)
@@ -96,9 +97,9 @@ class DeviceGraph(nn.Module):
             for n in init
             if n.startswith("presence_head.weight") and n.endswith("_quantized")
         ]
-        if len(convs) != 4 or len(biases) != 4 or len(head) != 1:
-            raise SystemExit(f"{path}: not a 4-block presence-head detector export")
-        model = cls(width=init[f"{convs[0]}_quantized"].dims[0])
+        if len(convs) < 4 or len(biases) != len(convs) or len(head) != 1:
+            raise SystemExit(f"{path}: not a presence-head detector export")
+        model = cls(width=init[f"{convs[0]}_quantized"].dims[0], context=len(convs) - 4)
         with torch.no_grad():
             for i, (w, b) in enumerate(zip(convs, biases, strict=True)):
                 conv = model.features[2 * i]
@@ -232,6 +233,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--size", type=int, default=160, help="square input size (px)")
     ap.add_argument("--width", type=int, default=16, help="channel width (random weights only)")
+    ap.add_argument("--context", type=int, default=0, help="context blocks (random weights only)")
     ap.add_argument("--onnx", default=None, help="tensor-factory int8 ONNX to take weights from")
     ap.add_argument("--calib", default=None, help="directory of calibration images; else noise")
     ap.add_argument("--calib-steps", type=int, default=64)
@@ -252,7 +254,9 @@ def main() -> None:
     ap.add_argument("--out", required=True, help="output .espdl path")
     args = ap.parse_args()
 
-    model = (DeviceGraph.from_onnx(args.onnx) if args.onnx else DeviceGraph(args.width)).eval()
+    model = (
+        DeviceGraph.from_onnx(args.onnx) if args.onnx else DeviceGraph(args.width, args.context)
+    ).eval()
 
     if args.calib:
         paths = sorted(p for p in Path(args.calib).rglob("*") if p.suffix.lower() in _EXTS)
