@@ -92,7 +92,7 @@ class NanoBananaGenerator:
         try:
             # `google` is a namespace package (protobuf et al. occupy it), so an absent
             # `genai` raises ImportError, not ModuleNotFoundError -- catch both.
-            from google import genai  # ty: ignore[import-not-found]
+            from google import genai  # ty: ignore[missing-module-member]
         except ImportError as exc:
             raise RuntimeError(
                 "NanoBananaGenerator needs the 'gemini' extra: uv sync --extra gemini"
