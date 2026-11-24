@@ -147,12 +147,15 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       difficulty: low
       id: edge-on-real-board
 
-- [ ] **Build the cloud piece.** Nothing is in AWS yet. What gets built depends on the
-  answer to the "cloud" question above; the recommended first piece is an S3 store for
-  datasets and models, since every dataset is gitignored on one machine.
-      depends: cloud-direction
-      difficulty: med
-      id: cloud-build
+- [ ] **Give the edge its own read-only AWS key.** The S3 store works from this Mac with
+  your own credentials. A board should not carry those: it needs an IAM user or role that
+  can only `s3:GetObject` and `s3:ListBucket` on the store bucket.
+      needs: a named edge board (see `edge-target-host`)
+      result: the board pulls a model by sha256 with a key that cannot write or delete
+      depends: edge-target-host
+      est: 30m
+      difficulty: low
+      id: edge-readonly-key
 
 ## Model quality
 

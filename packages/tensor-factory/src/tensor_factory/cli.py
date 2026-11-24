@@ -74,6 +74,35 @@ def _cmd_pack(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_store(args: argparse.Namespace) -> int:
+    import sys
+
+    from .store import S3Store, StoreError
+
+    try:
+        store = S3Store.from_env(args.store)
+        if args.action == "push-model":
+            sha = store.push_model(args.path, args.name)
+            print(f"{sha}  {args.path}")
+        elif args.action == "pull-model":
+            sha = store.pull_model(args.ref, args.out)
+            print(f"{sha}  {args.out}")
+        elif args.action == "push-dataset":
+            manifest = store.push_dataset(args.path, args.name)
+            size = sum(f["size"] for f in manifest["files"])
+            print(f"{manifest['name']}: {len(manifest['files'])} files, {size} B")
+        elif args.action == "pull-dataset":
+            manifest = store.pull_dataset(args.name, args.out)
+            print(f"{args.name}: {len(manifest['files'])} files -> {args.out}")
+        else:
+            for key, size in store.list(args.prefix):
+                print(f"{size:>12}  {key}")
+    except StoreError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tensor-factory")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -107,6 +136,27 @@ def _build_parser() -> argparse.ArgumentParser:
     k.add_argument("--model", required=True, help="path to the ONNX model")
     k.add_argument("--out", default=None, help="output path (default: <model>.tfm)")
     k.set_defaults(func=_cmd_pack)
+
+    s = sub.add_parser("store", help="push and pull models and datasets (S3, stdlib only)")
+    s.add_argument(
+        "--store", default=None, help="s3://bucket[/prefix]; default $TENSOR_FACTORY_STORE"
+    )
+    act = s.add_subparsers(dest="action", required=True)
+    a = act.add_parser("push-model", help="upload a model; prints its sha256")
+    a.add_argument("path", help="model file (.onnx or .tfm)")
+    a.add_argument("--name", default=None, help="name to record it under (default: file stem)")
+    a = act.add_parser("pull-model", help="download a model by sha256 or name, verified")
+    a.add_argument("ref", help="sha256 (64 hex) or a model name")
+    a.add_argument("--out", required=True, help="where to write it (replaced atomically)")
+    a = act.add_parser("push-dataset", help="upload every file under a dataset directory")
+    a.add_argument("path", help="dataset directory")
+    a.add_argument("--name", default=None, help="dataset name (default: directory name)")
+    a = act.add_parser("pull-dataset", help="download a dataset by name")
+    a.add_argument("name", help="dataset name")
+    a.add_argument("--out", required=True, help="directory to write into")
+    a = act.add_parser("ls", help="list what is in the store")
+    a.add_argument("prefix", nargs="?", default="", help="e.g. models/ or datasets/")
+    s.set_defaults(func=_cmd_store)
     return parser
 
 

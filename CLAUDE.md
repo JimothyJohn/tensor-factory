@@ -47,6 +47,14 @@ open quality ceiling (see [`TODO.md`](TODO.md)).
   `/detect`. The model is unpacked to `~/.cache/tensor-factory/` (sha256-verified each
   start). `scripts/portability_check.py` step 5 builds and runs one with `-S -I`, and the
   CI `portability` job runs it on x86-64 and aarch64 Linux.
+- **S3 store (`tensor_factory.store`, `tensor-factory store`).** Models and datasets are
+  pushed to and pulled from one private bucket, content-addressed by sha256
+  (`blobs/sha256/<hex>`, `models/<name>.json`, `datasets/<name>/manifest.json`). Pure
+  stdlib (SigV4 over `urllib`), so it ships inside `edge.pyz` and a bare-Python device can
+  pull a model by sha256; a pull is verified, then `os.replace`d, which hot reload picks
+  up. `scripts/store_bucket.sh` creates or re-asserts the bucket (public access blocked,
+  TLS-only, versioned, lifecycle rules). Config: `TENSOR_FACTORY_STORE=s3://…` plus the
+  usual `AWS_*` variables. The real-bucket tests are `-m integration` and skip without it.
 - **Model hot reload.** `core` ties each cached detector to its file's mtime + size: replace
   the file (atomically: write beside, `mv` over) and the next request loads it. A
   replacement that fails to load keeps the old model serving; `/model_info` reports
