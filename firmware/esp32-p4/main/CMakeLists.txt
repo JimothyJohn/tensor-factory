@@ -11,7 +11,7 @@ endforeach()
 
 idf_component_register(SRCS app_main.cpp
                        INCLUDE_DIRS models
-                       REQUIRES esp-dl esp_timer esp_rom)
+                       REQUIRES esp-dl esp_timer esp_rom esp_partition esp_driver_uart)
 
 idf_component_get_property(espdl_dir espressif__esp-dl COMPONENT_DIR)
 set(cmake_dir ${espdl_dir}/fbs_loader/cmake)  # utilities.cmake reads this name
