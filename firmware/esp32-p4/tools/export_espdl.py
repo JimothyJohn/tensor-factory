@@ -25,9 +25,9 @@ import json
 import math
 from pathlib import Path
 
-import torch
-from torch import nn
-from torch.utils.data import DataLoader, Dataset
+import torch  # ty: ignore[import-not-found]
+from torch import nn  # ty: ignore[import-not-found]
+from torch.utils.data import DataLoader, Dataset  # ty: ignore[import-not-found]
 
 from tensor_factory.zerort import parse_model
 from tensor_factory_train.data import load_coco_boxes, load_negatives
@@ -90,7 +90,13 @@ class DeviceGraph(nn.Module):
             ),
             key=lambda n: int(n.rsplit("_", 1)[1]),
         )
-        if len(convs) != 4 or len(biases) != 4 or "presence_head.weight_quantized" not in init:
+        # The exporter names this "presence_head.weight" or "..._Transposed" by version.
+        head = [
+            n[: -len("_quantized")]
+            for n in init
+            if n.startswith("presence_head.weight") and n.endswith("_quantized")
+        ]
+        if len(convs) != 4 or len(biases) != 4 or len(head) != 1:
             raise SystemExit(f"{path}: not a 4-block presence-head detector export")
         model = cls(width=init[f"{convs[0]}_quantized"].dims[0])
         with torch.no_grad():
@@ -100,7 +106,7 @@ class DeviceGraph(nn.Module):
                 conv.bias.copy_(vector(b))
             model.heat.weight.copy_(weight("heat.weight"))
             model.heat.bias.copy_(vector("heat.bias"))
-            model.presence_head.weight.copy_(weight("presence_head.weight").T)  # MatMul: x @ W
+            model.presence_head.weight.copy_(weight(head[0]).T)  # MatMul: x @ W
             model.presence_head.bias.copy_(vector("presence_head.bias"))
         model.gain = math.exp(init["log_gain"].data[0])
         return model
@@ -209,8 +215,8 @@ def main() -> None:
     else:
         data = _Noise(args.calib_steps, args.size)
 
-    from esp_ppq.api import espdl_quantize_torch
-    from esp_ppq.executor.torch import TorchExecutor
+    from esp_ppq.api import espdl_quantize_torch  # ty: ignore[import-not-found]
+    from esp_ppq.executor.torch import TorchExecutor  # ty: ignore[import-not-found]
 
     graph = espdl_quantize_torch(
         model=model,

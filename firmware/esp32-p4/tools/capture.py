@@ -9,7 +9,7 @@ import argparse
 import sys
 import time
 
-import serial  # pyserial; present in the ESP-IDF Python environment
+import serial  # ty: ignore[import-not-found]
 
 
 def main() -> int:

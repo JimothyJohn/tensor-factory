@@ -1,0 +1,6 @@
+SOAK_START {"model":"real_320","frames":8,"self_test":true,"shapes_ok":true,"input_exp":-7,"heat":[20,20,4]}
+SOAK {"frames":8,"desktop_mismatch":0,"self_mismatch":0,"pre_ms":7.19,"net_ms":23.72,"post_ms":0.55,"frame_ms":31.46,"max_ms":31.64,"worst_box":0.00000,"worst_presence":0.0000,"internal_min_free":35136,"psram_min_free":28140860,"uptime_s":0}
+SOAK {"frames":16,"desktop_mismatch":0,"self_mismatch":0,"pre_ms":7.18,"net_ms":23.69,"post_ms":0.55,"frame_ms":31.42,"max_ms":31.60,"worst_box":0.00000,"worst_presence":0.0000,"internal_min_free":35136,"psram_min_free":28140860,"uptime_s":0}
+SOAK {"frames":24,"desktop_mismatch":0,"self_mismatch":0,"pre_ms":7.18,"net_ms":23.70,"post_ms":0.55,"frame_ms":31.43,"max_ms":31.58,"worst_box":0.00000,"worst_presence":0.0000,"internal_min_free":35136,"psram_min_free":28140860,"uptime_s":0}
+SOAK {"frames":208,"desktop_mismatch":0,"self_mismatch":0,"pre_ms":7.18,"net_ms":23.69,"post_ms":0.55,"frame_ms":31.43,"max_ms":31.50,"worst_box":0.00000,"worst_presence":0.0000,"internal_min_free":35136,"psram_min_free":28140860,"uptime_s":6}
+SOAK {"frames":408,"desktop_mismatch":0,"self_mismatch":0,"pre_ms":7.18,"net_ms":23.72,"post_ms":0.55,"frame_ms":31.46,"max_ms":31.68,"worst_box":0.00000,"worst_presence":0.0000,"internal_min_free":35136,"psram_min_free":28140860,"uptime_s":13}
