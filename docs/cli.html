@@ -98,6 +98,26 @@
             <tr><td><code>--size</code></td><td><code>480</code></td><td>model input size (px)</td></tr>
           </tbody>
         </table>
+
+        <h3>store</h3>
+        <p>Push and pull models and datasets to a private S3 bucket. Pure standard library, so a device with nothing but Python can pull a model. Every file is stored once under its sha256; a pulled file is verified and then moved into place in one step, which is what a running server's hot reload picks up.</p>
+        <div class="sig">tensor-factory store [--store s3://bucket[/prefix]] ACTION …</div>
+        <table>
+          <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>push-model PATH [--name N]</code></td><td>upload a model and print its sha256; the name defaults to the file stem</td></tr>
+            <tr><td><code>pull-model REF --out PATH</code></td><td>download by sha256 or by name, verified; the old file stays if verification fails</td></tr>
+            <tr><td><code>push-dataset DIR [--name N]</code></td><td>upload every file under a dataset directory (links are not followed)</td></tr>
+            <tr><td><code>pull-dataset NAME --out DIR</code></td><td>restore a dataset; files already present and intact are skipped</td></tr>
+            <tr><td><code>ls [PREFIX]</code></td><td>list what is stored, e.g. <code>models/</code> or <code>datasets/</code></td></tr>
+          </tbody>
+        </table>
+<pre>scripts/store_bucket.sh                                  <span class="c"># once: creates the private bucket, prints TENSOR_FACTORY_STORE=…</span>
+tensor-factory store push-model model.onnx               <span class="c"># prints the sha256</span>
+tensor-factory store push-dataset examples/helicoils/images/real
+
+<span class="c"># on the device, with only the edge bundle and read-only AWS keys in the environment</span>
+PYTHONPATH=edge.pyz python3 -m tensor_factory.cli store pull-model SHA256 --out model.onnx</pre>
       </section>
 
       <section id="synth">
@@ -315,6 +335,9 @@ curl http://device:8088/model_info                       <span class="c"># sha25
           <tbody>
             <tr><td><code>GEMINI_API_KEY</code> / <code>GOOGLE_API_KEY</code></td><td>Nano Banana generation</td></tr>
             <tr><td><code>LABEL_STUDIO_URL</code> / <code>LABEL_STUDIO_API_KEY</code></td><td>Label Studio push/pull</td></tr>
+            <tr><td><code>TENSOR_FACTORY_STORE</code></td><td><code>tensor-factory store</code>: <code>s3://bucket[/prefix]</code></td></tr>
+            <tr><td><code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> / <code>AWS_SESSION_TOKEN</code>, <code>AWS_REGION</code></td><td><code>tensor-factory store</code> credentials and region (default <code>us-east-1</code>)</td></tr>
+            <tr><td><code>TENSOR_FACTORY_STORE_ENDPOINT</code></td><td>optional S3-compatible endpoint for <code>tensor-factory store</code></td></tr>
             <tr><td><code>UV_PUBLISH_TOKEN</code></td><td><code>./Quickstart -p</code> publish</td></tr>
             <tr><td><code>PYTORCH_ENABLE_MPS_FALLBACK</code></td><td>set automatically by the auto-labeler for MPS</td></tr>
           </tbody>
