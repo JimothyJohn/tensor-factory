@@ -137,3 +137,25 @@ def test_no_sources_waits_for_labels_as_before(tmp_path):
     tr = _trainer(tmp_path)
     assert not tr._dirty.is_set()
     assert tr._data_dirs() == []
+
+
+@pytest.mark.unit
+def test_without_torch_the_trainer_thread_says_so_and_ends(tmp_path, monkeypatch):
+    # The server is also the page's helper for flashing boards; it must come up, and say
+    # why it is not training, on a machine that never installed the heavy serve extra.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_torch(name, *args, **kwargs):
+        if name == "tensor_factory_train.train" or name.split(".")[0] == "torch":
+            raise ImportError("No module named 'torch'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_torch)
+    tr = _trainer(tmp_path)
+    tr.mark_dirty()
+    tr.run()  # returns instead of raising or spinning
+    m = tr.metrics()
+    assert m["backend"] == "none" and "torch is not installed" in m["status"]
+    json.dumps(m)

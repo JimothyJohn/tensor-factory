@@ -104,6 +104,15 @@ export class Device {
     }, POLL_MS);
   }
 
+  /** Hand a browser-trained model (ONNX bytes) to the backend so it can deploy it. */
+  async uploadModel(bytes) {
+    const r = await fetch("/model", { method: "POST", body: bytes });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${r.status}`);
+    }
+  }
+
   /** Fetch a model file; returns {blob, name} or throws with the backend's message. */
   async download(format) {
     const r = await fetch(`/model?format=${encodeURIComponent(format)}`);

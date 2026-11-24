@@ -394,6 +394,75 @@ def test_p4_download_is_a_valid_packed_image(server, stand_in):
     assert code == 200 and tool.unpack(image)["size"] == 480
 
 
+def _post_bytes(base, path, body):
+    req = urllib.request.Request(f"{base}{path}", data=body, method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+    except HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+@pytest.mark.unit
+def test_a_browser_trained_model_becomes_the_served_model(server):
+    base, tr = server  # this server's input size is 480, the bundled model's
+    assert tr.served is None
+    code, body = _post_bytes(base, "/model", BUNDLED.read_bytes())
+    assert code == 200, body
+    assert tr.served is not None and tr.served.read_bytes() == BUNDLED.read_bytes()
+    assert _status(base, "/model")[1] == BUNDLED.read_bytes()
+    assert json.loads(_status(base, "/status")[1])["hasModel"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body",
+    [b"not a model", b"\x08\x08" * 2000, BUNDLED.read_bytes()[:5000], b"PK\x03\x04" + b"\0" * 64],
+    ids=["text", "protobuf-noise", "truncated", "zip"],
+)
+def test_bytes_that_are_not_a_detector_do_not_replace_the_model(server, body):
+    base, tr = server
+    _post_bytes(base, "/model", BUNDLED.read_bytes())
+    served = tr.served.read_bytes()
+    code, payload = _post_bytes(base, "/model", body)
+    assert code == 400 and "not a detector model" in payload["error"], payload
+    assert tr.served.read_bytes() == served
+
+
+@pytest.mark.unit
+def test_a_model_for_another_input_size_is_refused(tmp_path):
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("x", encoding="utf-8")
+    ds = Dataset(tmp_path / "data")
+    tr = Trainer(ds, tmp_path / "data" / "models")
+    # this server works at 224 px; the bundled model declares 480
+    httpd = make_server("127.0.0.1", 0, dataset=ds, trainer=tr, ui_dir=ui, input_size=224)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        code, payload = _post_bytes(base, "/model", BUNDLED.read_bytes())
+        assert code == 400, payload
+        assert tr.served is None
+    finally:
+        httpd.shutdown()
+
+
+@pytest.mark.unit
+def test_an_empty_or_oversized_model_upload_is_refused(server):
+    base, tr = server
+    assert _post_bytes(base, "/model", b"")[0] in (400, 411)
+    assert tr.served is None
+
+
+@pytest.mark.unit
+def test_status_says_whether_the_backend_holds_source_data(server):
+    base, tr = server
+    assert json.loads(_status(base, "/status")[1])["sources"] == 0
+    tr.sources = [Path("/somewhere")]
+    assert json.loads(_status(base, "/status")[1])["sources"] == 1
+
+
 @pytest.mark.unit
 def test_status_reports_what_is_being_trained(server):
     base, _ = server

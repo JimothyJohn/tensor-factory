@@ -7,6 +7,10 @@ Needs ``pip install playwright`` and ``playwright install chromium`` for that py
 Serves ``studio/`` on a free local port, opens ``tests/gpu/harness.html`` with WebGPU
 enabled and fails if any value is further from torch's than ``TOLERANCE`` (float32 on the
 GPU against float64 ground truth). Not part of the gate: it needs a browser and a GPU.
+
+``--train`` also runs ``local.html``: 120 synthetic frames through the whole browser path
+(decode, resize, train at 224 px, export). ``--save DIR`` writes the exported model, a
+probe frame and the report there, for checking the model in the Python runtime.
 Exit status 0 = all checks passed, 1 = a check failed, 2 = no WebGPU adapter here.
 """
 
@@ -30,6 +34,32 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         return
 
 
+def _trained(local: dict) -> bool:
+    """Judge the end-to-end browser training run; save its model and probe frame."""
+    import base64
+
+    r = local.get("report")
+    if not r:
+        print("training run failed: " + str(local.get("error"))[:600])
+        return False
+    print("train " + json.dumps({k: v for k, v in r.items() if k != "errors"}))
+    if "--save" in sys.argv:
+        out = Path(sys.argv[sys.argv.index("--save") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "browser.onnx").write_bytes(base64.b64decode(local["onnx"] or ""))
+        (out / "probe.png").write_bytes(base64.b64decode(local["probe"]))
+        (out / "report.json").write_text(json.dumps(r, indent=2) + "\n")
+    return (
+        not r["errors"]
+        and r["err"] is not None
+        and r["err"] < 0.5 * r["baseline"]  # finding the object, by a wide margin
+        and r["lastLoss"] < r["firstLoss"]
+        and r["probePresent"] is True
+        and r["emptyPresent"] is False
+        and r["onnxBytes"] > 100_000
+    )
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright  # ty: ignore[import-not-found]
 
@@ -48,6 +78,11 @@ def main() -> int:
         page.goto(url)
         page.wait_for_function("window.report !== undefined", timeout=300_000)
         report = page.evaluate("window.report")
+        local = None
+        if "--train" in sys.argv:
+            page.goto(url.replace("harness.html", "local.html"))
+            page.wait_for_function("window.localReport !== undefined", timeout=900_000)
+            local = page.evaluate("window.localReport")
         browser.close()
     httpd.shutdown()
     if report.get("error") == "no WebGPU adapter":
@@ -64,6 +99,8 @@ def main() -> int:
     for line in [*failed[:12], *errors[:3]]:
         print("  " + line[:600])
     ok = not failed and not errors and "error" not in report and "gpuError" not in report
+    if local is not None:
+        ok = _trained(local) and ok
     ok = ok and len(report.get("checks", {})) >= 60 and len(report.get("loose", {})) == 2
     return 0 if ok and report.get("finite") else 1
 
