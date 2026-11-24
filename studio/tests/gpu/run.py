@@ -1,6 +1,8 @@
 """Check the WebGPU trainer against the CPU reference in a real, headless Chromium.
 
-    python3 studio/tests/gpu/run.py            # needs: pip install playwright; playwright install chromium
+    python3 studio/tests/gpu/run.py
+
+Needs ``pip install playwright`` and ``playwright install chromium`` for that python.
 
 Serves ``studio/`` on a free local port, opens ``tests/gpu/harness.html`` with WebGPU
 enabled and fails if any value is further from torch's than ``TOLERANCE`` (float32 on the
@@ -24,12 +26,12 @@ FLAGS = ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-angle=meta
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args) -> None:  # noqa: ANN002
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature
         return
 
 
 def main() -> int:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright  # ty: ignore[import-not-found]
 
     handler = functools.partial(Quiet, directory=str(STUDIO))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -39,7 +41,9 @@ def main() -> int:
         browser = p.chromium.launch(args=FLAGS)
         page = browser.new_page()
         errors: list[str] = []
-        page.on("console", lambda m: errors.append(m.text) if m.type in ("error", "warning") else None)
+        page.on(
+            "console", lambda m: errors.append(m.text) if m.type in ("error", "warning") else None
+        )
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(url)
         page.wait_for_function("window.report !== undefined", timeout=300_000)
@@ -53,7 +57,10 @@ def main() -> int:
     failed += [f"{k}: {v:.2e}" for k, v in report.get("loose", {}).items() if not v <= LOOSE]
     worst = max(report.get("checks", {"-": float("inf")}).values())
     print(json.dumps({k: v for k, v in report.items() if k not in ("checks", "loose")}))
-    print(f"{len(report.get('checks', {}))} checks, worst error {worst:.2e} (tolerance {TOLERANCE:.0e})")
+    print(
+        f"{len(report.get('checks', {}))} checks, worst error {worst:.2e} "
+        f"(tolerance {TOLERANCE:.0e})"
+    )
     for line in [*failed[:12], *errors[:3]]:
         print("  " + line[:600])
     ok = not failed and not errors and "error" not in report and "gpuError" not in report

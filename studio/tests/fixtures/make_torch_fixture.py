@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import torch
-from torch import nn
+import torch  # ty: ignore[import-not-found]
+from torch import nn  # ty: ignore[import-not-found]
 
 from tensor_factory_train.model import TinyDetector
 
@@ -79,7 +79,10 @@ def main() -> None:
     torch.manual_seed(7)
     fresh = TinyDetector(WIDTH, presence=True, context=CONTEXT).double()
     fresh.load_state_dict(
-        {k: torch.tensor(v["data"], dtype=torch.float64).reshape(v["shape"]) for k, v in out["params"].items()},
+        {
+            k: torch.tensor(v["data"], dtype=torch.float64).reshape(v["shape"])
+            for k, v in out["params"].items()
+        },
         strict=False,
     )
     opt = torch.optim.Adam(fresh.parameters(), lr=1e-3)
