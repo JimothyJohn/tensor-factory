@@ -56,38 +56,42 @@ const KERNELS = {
   }
   y[idx] = acc;`),
 
-  // a = (N, C, H, W); f.x = momentum, f.y = unbiased-variance factor. One invocation per channel.
-  bnStats: kernel([["conv", "r"], ["stats", "rw"], ["running", "rw"]], `
-  let n = u.a.x; let c = u.a.y; let h = u.a.z; let wd = u.a.w;
-  let count = f32(n * h * wd);
-  var total = 0.0;
+  // Reductions over (N, H, W) per channel are done in two parallel stages, never as one
+  // long loop in a single invocation: a row kernel writes one partial per (sample,
+  // channel, row), then chanReduce adds a channel's partials. a = (N, C, H, W) throughout.
+  rowSum: kernel([["src", "r"], ["part", "rw"]], `
+  var acc = 0.0;
+  for (var xx = 0u; xx < u.a.w; xx++) { acc += src[idx * u.a.w + xx]; }
+  part[idx] = acc;`),
+
+  // partial of (src - mean)^2, mean = stats[ch]
+  rowSqDev: kernel([["src", "r"], ["stats", "r"], ["part", "rw"]], `
+  let mean = stats[(idx / u.a.z) % u.a.y];
+  var acc = 0.0;
+  for (var xx = 0u; xx < u.a.w; xx++) { let d = src[idx * u.a.w + xx] - mean; acc += d * d; }
+  part[idx] = acc;`),
+
+  rowDot: kernel([["p0", "r"], ["p1", "r"], ["part", "rw"]], `
+  var acc = 0.0;
+  for (var xx = 0u; xx < u.a.w; xx++) { acc += p0[idx * u.a.w + xx] * p1[idx * u.a.w + xx]; }
+  part[idx] = acc;`),
+
+  // dst[c.x + ch] = f.x * sum of the channel's partials. One invocation per channel.
+  chanReduce: kernel([["part", "r"], ["dst", "rw"]], `
+  let n = u.a.x; let c = u.a.y; let h = u.a.z;
+  var acc = 0.0;
   for (var i = 0u; i < n; i++) {
     var plane = 0.0;
-    for (var yy = 0u; yy < h; yy++) {
-      var row = 0.0;
-      let base = ((i * c + idx) * h + yy) * wd;
-      for (var xx = 0u; xx < wd; xx++) { row += conv[base + xx]; }
-      plane += row;
-    }
-    total += plane;
+    for (var yy = 0u; yy < h; yy++) { plane += part[(i * c + idx) * h + yy]; }
+    acc += plane;
   }
-  let mean = total / count;
-  var sq = 0.0;
-  for (var i = 0u; i < n; i++) {
-    var plane = 0.0;
-    for (var yy = 0u; yy < h; yy++) {
-      var row = 0.0;
-      let base = ((i * c + idx) * h + yy) * wd;
-      for (var xx = 0u; xx < wd; xx++) { let d = conv[base + xx] - mean; row += d * d; }
-      plane += row;
-    }
-    sq += plane;
-  }
-  let variance = sq / count;
-  stats[idx] = mean;
-  stats[c + idx] = variance;
-  running[idx] = (1.0 - u.f.x) * running[idx] + u.f.x * mean;
-  running[c + idx] = (1.0 - u.f.x) * running[c + idx] + u.f.x * variance * u.f.y;`),
+  dst[u.c.x + idx] = acc * u.f.x;`),
+
+  // f.x = momentum, f.y = unbiased-variance factor. stats = [mean x C][var x C].
+  bnRunning: kernel([["stats", "r"], ["running", "rw"]], `
+  let c = u.a.y;
+  running[idx] = (1.0 - u.f.x) * running[idx] + u.f.x * stats[idx];
+  running[c + idx] = (1.0 - u.f.x) * running[c + idx] + u.f.x * stats[c + idx] * u.f.y;`),
 
   // a = (N, C, H, W); f.x = eps. stats is the batch's (training) or the running ones (eval).
   bnRelu: kernel(
@@ -211,71 +215,50 @@ const KERNELS = {
   dOut[idx] = acc;`,
   ),
 
-  // a = (N, C, H, W). One invocation per channel: sums[ch] = dBeta, sums[C + ch] = dGamma.
-  bnSums: kernel([["dOut", "r"], ["act", "r"], ["xhat", "r"], ["sums", "rw"]], `
-  let n = u.a.x; let c = u.a.y; let h = u.a.z; let wd = u.a.w;
-  var dBeta = 0.0; var dGamma = 0.0;
-  for (var i = 0u; i < n; i++) {
-    var pb = 0.0; var pg = 0.0;
-    for (var yy = 0u; yy < h; yy++) {
-      var rb = 0.0; var rg = 0.0;
-      let base = ((i * c + idx) * h + yy) * wd;
-      for (var xx = 0u; xx < wd; xx++) {
-        if (act[base + xx] > 0.0) { rb += dOut[base + xx]; rg += dOut[base + xx] * xhat[base + xx]; }
-      }
-      pb += rb; pg += rg;
-    }
-    dBeta += pb; dGamma += pg;
-  }
-  sums[idx] = dBeta;
-  sums[c + idx] = dGamma;`),
+  // ReLU's gradient, in place: zero where the activation was clipped.
+  reluMask: kernel([["act", "r"], ["dOut", "rw"]], `
+  if (act[idx] <= 0.0) { dOut[idx] = 0.0; }`),
 
-  // a = (N, C, H, W); f.x = eps. Gradient at the conv output, through ReLU and batch norm.
+  // a = (N, C, H, W); f.x = eps. Gradient at the conv output, through batch norm (dOut is
+  // already masked by reluMask; sums = [dBeta x C][dGamma x C]).
   dConv: kernel(
-    [["dOut", "r"], ["act", "r"], ["xhat", "r"], ["sums", "r"], ["gamma", "r"], ["stats", "r"], ["dConvOut", "rw"]],
+    [["dOut", "r"], ["xhat", "r"], ["sums", "r"], ["gamma", "r"], ["stats", "r"], ["dConvOut", "rw"]],
     `
   let c = u.a.y; let count = f32(u.a.x * u.a.z * u.a.w);
   let ch = (idx / (u.a.z * u.a.w)) % c;
-  let dAct = select(0.0, dOut[idx], act[idx] > 0.0);
   let scale = gamma[ch] * inverseSqrt(stats[c + ch] + u.f.x) / count;
-  dConvOut[idx] = scale * (count * dAct - sums[ch] - xhat[idx] * sums[c + ch]);`,
+  dConvOut[idx] = scale * (count * dOut[idx] - sums[ch] - xhat[idx] * sums[c + ch]);`,
   ),
 
-  // conv dims. One invocation per weight.
-  convDw: kernel([["x", "r"], ["dy", "r"], ["dw", "rw"]], `
-  let n = u.a.x; let cin = u.a.y; let h = i32(u.a.z); let wd = i32(u.a.w);
+  // conv dims. One invocation per (sample, weight): that sample's share of the weight
+  // gradient. sumSamples adds the shares.
+  convDwPart: kernel([["x", "r"], ["dy", "r"], ["part", "rw"]], `
+  let cin = u.a.y; let h = i32(u.a.z); let wd = i32(u.a.w);
   let cout = u.b.x; let ho = u.b.y; let wo = u.b.z; let k = u.c.y;
-  let kx = idx % k; let ky = (idx / k) % k; let ci = (idx / (k * k)) % cin; let co = idx / (k * k * cin);
+  let weights = cout * cin * k * k;
+  let i = idx / weights; let wi = idx % weights;
+  let kx = wi % k; let ky = (wi / k) % k; let ci = (wi / (k * k)) % cin; let co = wi / (k * k * cin);
   var acc = 0.0;
-  for (var i = 0u; i < n; i++) {
-    var plane = 0.0;
-    let xb = (i * cin + ci) * u32(h * wd);
-    let yb = (i * cout + co) * ho * wo;
-    for (var oy = 0u; oy < ho; oy++) {
-      let iy = i32(oy * u.b.w + ky) - i32(u.c.x);
-      if (iy < 0 || iy >= h) { continue; }
-      var row = 0.0;
-      for (var ox = 0u; ox < wo; ox++) {
-        let ix = i32(ox * u.b.w + kx) - i32(u.c.x);
-        if (ix < 0 || ix >= wd) { continue; }
-        row += dy[yb + oy * wo + ox] * x[xb + u32(iy * wd + ix)];
-      }
-      plane += row;
+  let xb = (i * cin + ci) * u32(h * wd);
+  let yb = (i * cout + co) * ho * wo;
+  for (var oy = 0u; oy < ho; oy++) {
+    let iy = i32(oy * u.b.w + ky) - i32(u.c.x);
+    if (iy < 0 || iy >= h) { continue; }
+    var row = 0.0;
+    for (var ox = 0u; ox < wo; ox++) {
+      let ix = i32(ox * u.b.w + kx) - i32(u.c.x);
+      if (ix < 0 || ix >= wd) { continue; }
+      row += dy[yb + oy * wo + ox] * x[xb + u32(iy * wd + ix)];
     }
-    acc += plane;
+    acc += row;
   }
-  dw[idx] = acc;`),
+  part[idx] = acc;`),
 
-  // conv dims. One invocation per output channel.
-  convDb: kernel([["dy", "r"], ["db", "rw"]], `
-  let n = u.a.x; let cout = u.b.x; let hw = u.b.y * u.b.z;
+  // a.x = N. dst[idx] = sum over samples of part[sample * total + idx].
+  sumSamples: kernel([["part", "r"], ["dst", "rw"]], `
   var acc = 0.0;
-  for (var i = 0u; i < n; i++) {
-    var plane = 0.0;
-    for (var j = 0u; j < hw; j++) { plane += dy[(i * cout + idx) * hw + j]; }
-    acc += plane;
-  }
-  db[idx] = acc;`),
+  for (var i = 0u; i < u.a.x; i++) { acc += part[i * u.c.z + idx]; }
+  dst[idx] = acc;`),
 
   // conv dims. One invocation per input element.
   convDx: kernel([["dy", "r"], ["w", "r"], ["dx", "rw"]], `
@@ -387,7 +370,7 @@ export class GpuTrainer {
     });
     const groups = Math.ceil(total / 64);
     const gx = Math.min(groups, ROW / 64);
-    return { pipeline, group, gx, gy: Math.ceil(groups / gx), uniform, raw };
+    return { name: kernelName, total, pipeline, group, gx, gy: Math.ceil(groups / gx), uniform, raw };
   }
 
   /** Buffers and kernel calls for one batch size; built once and reused. */
@@ -425,9 +408,16 @@ export class GpuTrainer {
       const beta = B[`features.${i}.1.bias`];
       const conv = this._op("conv", [input, w, bias, L.conv], count, L.dims);
       const perSample = n * ho * ho;
+      const rows = n * blk.cout * ho;
+      L.part = this._buffer(rows);
+      L.dwPart = this._buffer(n * blk.cout * blk.cin * 9);
       P.forward.push(
         conv,
-        this._op("bnStats", [L.conv, L.stats, B[`running:${i}`]], blk.cout, {
+        this._op("rowSum", [L.conv, L.part], rows, L.bn),
+        this._op("chanReduce", [L.part, L.stats], blk.cout, { ...L.bn, f: [1 / perSample, 0, 0, 0] }),
+        this._op("rowSqDev", [L.conv, L.stats, L.part], rows, L.bn),
+        this._op("chanReduce", [L.part, L.stats], blk.cout, { ...L.bn, pad: blk.cout, f: [1 / perSample, 0, 0, 0] }),
+        this._op("bnRunning", [L.stats, B[`running:${i}`]], blk.cout, {
           ...L.bn,
           f: [BN_MOMENTUM, perSample > 1 ? perSample / (perSample - 1) : 1, 0, 0],
         }),
@@ -457,6 +447,8 @@ export class GpuTrainer {
     P.dBox = this._buffer(n * 4);
     P.dLogit = this._buffer(n);
     P.lossOut = this._buffer(n);
+    P.heatDwPart = this._buffer(n * 4 * c);
+    P.heatPart = this._buffer(n * 4 * h);
     const heatDims = { a: [n, c, h, h], b: [4, h, h, 1], pad: 0, k: 1 };
     const heads = [
       this._op("conv", [last.act, B["heat.weight"], B["heat.bias"], P.heat], n * 4 * hw, heatDims),
@@ -477,8 +469,10 @@ export class GpuTrainer {
       this._op("dPresence", [P.dLogit, P.pooled, B["grad:presence_head.weight"], B["grad:presence_head.bias"]], 2 * c + 1, {
         a: [n, 2 * c, 0, 0],
       }),
-      this._op("convDw", [last.act, P.dHeat, B["grad:heat.weight"]], 4 * c, heatDims),
-      this._op("convDb", [P.dHeat, B["grad:heat.bias"]], 4, heatDims),
+      this._op("convDwPart", [last.act, P.dHeat, P.heatDwPart], n * 4 * c, heatDims),
+      this._op("sumSamples", [P.heatDwPart, B["grad:heat.weight"]], 4 * c, { a: [n, 0, 0, 0] }),
+      this._op("rowSum", [P.dHeat, P.heatPart], n * 4 * h, { a: [n, 4, h, h] }),
+      this._op("chanReduce", [P.heatPart, B["grad:heat.bias"]], 4, { a: [n, 4, h, h], f: [1, 0, 0, 0] }),
       this._op(
         "dFeat",
         [last.act, P.pooled, P.ties, P.dLogit, B["presence_head.weight"], P.dHeat, B["heat.weight"], last.dOut],
@@ -489,15 +483,23 @@ export class GpuTrainer {
     for (let i = layers.length - 1; i >= 0; i--) {
       const L = layers[i];
       const name = `features.${i}`;
+      const rows = n * L.blk.cout * L.bn.a[2];
+      const weights = L.blk.cout * L.blk.cin * 9;
       P.backward.push(
-        this._op("bnSums", [L.dOut, L.act, L.xhat, L.sums], L.blk.cout, L.bn),
-        this._op("dConv", [L.dOut, L.act, L.xhat, L.sums, B[`${name}.1.weight`], L.stats, L.dConv], L.count, {
+        this._op("reluMask", [L.act, L.dOut], L.count, L.bn),
+        this._op("rowSum", [L.dOut, L.part], rows, L.bn),
+        this._op("chanReduce", [L.part, L.sums], L.blk.cout, { ...L.bn, f: [1, 0, 0, 0] }),
+        this._op("rowDot", [L.dOut, L.xhat, L.part], rows, L.bn),
+        this._op("chanReduce", [L.part, L.sums], L.blk.cout, { ...L.bn, pad: L.blk.cout, f: [1, 0, 0, 0] }),
+        this._op("dConv", [L.dOut, L.xhat, L.sums, B[`${name}.1.weight`], L.stats, L.dConv], L.count, {
           ...L.bn,
           f: [BN_EPS, 0, 0, 0],
         }),
         // sums holds [dBeta, dGamma]: copied into the two gradient buffers after the pass
-        this._op("convDw", [L.input, L.dConv, B[`grad:${name}.0.weight`]], L.blk.cout * L.blk.cin * 9, L.dims),
-        this._op("convDb", [L.dConv, B[`grad:${name}.0.bias`]], L.blk.cout, L.dims),
+        this._op("convDwPart", [L.input, L.dConv, L.dwPart], n * weights, L.dims),
+        this._op("sumSamples", [L.dwPart, B[`grad:${name}.0.weight`]], weights, { a: [n, 0, 0, 0] }),
+        this._op("rowSum", [L.dConv, L.part], rows, L.bn),
+        this._op("chanReduce", [L.part, B[`grad:${name}.0.bias`]], L.blk.cout, { ...L.bn, f: [1, 0, 0, 0] }),
       );
       if (i > 0) {
         const below = layers[i - 1];
