@@ -52,8 +52,25 @@ def resolve_device(prefer: str | None = None) -> str:
     return "cpu"
 
 
-def _load_chw(path: Path, size: int):  # noqa: ANN202
-    img = Image.open(path).convert("RGB").resize((size, size), Image.Resampling.BILINEAR)
+RESIZE_MODES = ("bilinear", "nearest", "mixed")
+
+
+def _resample(resize: str, *, train: bool) -> Image.Resampling:
+    """The PIL filter for a ``resize`` mode.
+
+    ``mixed`` picks bilinear or nearest per training sample, so one model tolerates both a
+    desktop runtime (bilinear) and a runtime that can only subsample (ESP-DL on a
+    microcontroller); it validates on bilinear so runs stay deterministic and comparable.
+    """
+    if resize not in RESIZE_MODES:
+        raise ValueError(f"resize must be one of {RESIZE_MODES}, got {resize!r}")
+    if resize == "nearest" or (resize == "mixed" and train and random.random() < 0.5):
+        return Image.Resampling.NEAREST
+    return Image.Resampling.BILINEAR
+
+
+def _load_chw(path: Path, size: int, resample: Image.Resampling = Image.Resampling.BILINEAR):  # noqa: ANN202
+    img = Image.open(path).convert("RGB").resize((size, size), resample)
     arr = np.asarray(img, dtype=np.float32) / 255.0
     return torch.from_numpy(np.ascontiguousarray(arr.transpose(2, 0, 1)))
 
@@ -91,7 +108,10 @@ class _BoxDataset(Dataset):
         presence: bool = False,
         augment: bool = False,
         multiclass: bool = False,
+        resize: str = "bilinear",
     ) -> None:
+        _resample(resize, train=True)  # reject a bad mode up front, not on the first batch
+        self.resize = resize
         self.items = items
         self.size = size
         self.presence = presence
@@ -105,7 +125,7 @@ class _BoxDataset(Dataset):
         item = self.items[index]
         path, box = item[0], item[1]
         label = item[2] if len(item) > 2 else 0
-        x = _load_chw(path, self.size)
+        x = _load_chw(path, self.size, _resample(self.resize, train=True))
         has_box = box is not None
         coords = (box.x1, box.y1, box.x2, box.y2) if has_box else (0.0, 0.0, 0.0, 0.0)
         if self.augment:
@@ -227,7 +247,7 @@ def _summarize(
 
 
 def _val_records(  # noqa: ANN001
-    model, val_items, size, dev, *, presence, multiclass=False
+    model, val_items, size, dev, *, presence, multiclass=False, resize="bilinear"
 ) -> list[tuple[float | None, bool | None, bool | None]]:
     """One ``(center_err px, presence_correct, class_correct)`` record per held-out item,
     in ``val_items`` order -- the raw material for overall and per-source metrics alike."""
@@ -236,7 +256,8 @@ def _val_records(  # noqa: ANN001
     with torch.no_grad():
         for item in val_items:
             box = item[1]
-            raw = model(_load_chw(item[0], size).unsqueeze(0).to(dev))
+            x = _load_chw(item[0], size, _resample(resize, train=False))
+            raw = model(x.unsqueeze(0).to(dev))
             out: dict[str, Any] = (
                 dict(zip(model.output_names, raw, strict=True))
                 if isinstance(raw, tuple)
@@ -263,7 +284,7 @@ def _val_records(  # noqa: ANN001
 
 
 def _val_metrics(  # noqa: ANN001
-    model, val_items, size, dev, *, presence, multiclass=False
+    model, val_items, size, dev, *, presence, multiclass=False, resize="bilinear"
 ) -> tuple[float, float | None, float | None]:
     """Held-out (median center error px, presence accuracy, class accuracy) on ``val_items``.
 
@@ -272,7 +293,9 @@ def _val_metrics(  # noqa: ANN001
     no positive in the split there is no box error to report (0 penalty; accuracy leads).
     """
     return _summarize(
-        _val_records(model, val_items, size, dev, presence=presence, multiclass=multiclass)
+        _val_records(
+            model, val_items, size, dev, presence=presence, multiclass=multiclass, resize=resize
+        )
     )
 
 
@@ -336,6 +359,8 @@ def fit(
     require_review: bool = True,
     negatives: Sequence[str | Path] | None = None,
     learn_gain: bool = True,
+    context: int = 0,
+    resize: str = "bilinear",
     on_epoch: Callable[[dict], None] | None = None,
 ) -> Path:
     """Train on ``<data_dir>/annotations.coco.json`` + images and export int8 ONNX.
@@ -441,12 +466,23 @@ def fit(
     torch.manual_seed(seed)
     dev = resolve_device(device)
     loader = DataLoader(
-        _BoxDataset(train_items, size, presence=presence, augment=augment, multiclass=multiclass),
+        _BoxDataset(
+            train_items,
+            size,
+            presence=presence,
+            augment=augment,
+            multiclass=multiclass,
+            resize=resize,
+        ),
         batch_size=batch,
         shuffle=True,
     )
     model = TinyDetector(
-        width, presence=presence, learn_gain=learn_gain, num_classes=num_classes
+        width,
+        presence=presence,
+        learn_gain=learn_gain,
+        num_classes=num_classes,
+        context=context,
     ).to(dev)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     box_loss = nn.SmoothL1Loss()
@@ -492,7 +528,13 @@ def fit(
         line = f"epoch {epoch + 1}/{epochs}  loss {total / len(train_items):.5f}"
         if val_items:
             records = _val_records(
-                model, val_items, size, dev, presence=presence, multiclass=multiclass
+                model,
+                val_items,
+                size,
+                dev,
+                presence=presence,
+                multiclass=multiclass,
+                resize=resize,
             )
             err, acc, cls_acc = _summarize(records)
             # Higher is better. ``err`` is the median center error in *pixels*; normalize by
@@ -538,7 +580,7 @@ def fit(
     if best_state is not None:
         model.load_state_dict(best_state)
         records = _val_records(
-            model, val_items, size, dev, presence=presence, multiclass=multiclass
+            model, val_items, size, dev, presence=presence, multiclass=multiclass, resize=resize
         )
         err, acc, cls_acc = _summarize(records)
         if presence:
