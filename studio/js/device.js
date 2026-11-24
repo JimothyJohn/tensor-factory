@@ -65,6 +65,7 @@ export function howToUse(format) {
 }
 
 const POLL_MS = 1000;
+export const CALIB_FRAMES = 32;
 
 export class Device {
   constructor({ onState, onDevices } = {}) {
@@ -102,6 +103,23 @@ export class Device {
         /* keep polling: a deploy outlives one dropped request */
       }
     }, POLL_MS);
+  }
+
+  /**
+   * Hand a browser-trained model (ONNX bytes) to the backend so it can deploy it, with up
+   * to `CALIB_FRAMES` labeled frames (image blobs): the P4 quantizer calibrates on them
+   * and the first is tried on the board.
+   */
+  async uploadModel(bytes, frames = []) {
+    const post = async (url, body) => {
+      const r = await fetch(url, { method: "POST", body });
+      if (!r.ok) {
+        const payload = await r.json().catch(() => ({}));
+        throw new Error(payload.error || `HTTP ${r.status}`);
+      }
+    };
+    await post("/model", bytes);
+    for (const [i, blob] of frames.slice(0, CALIB_FRAMES).entries()) await post(`/calib?i=${i}`, blob);
   }
 
   /** Fetch a model file; returns {blob, name} or throws with the backend's message. */

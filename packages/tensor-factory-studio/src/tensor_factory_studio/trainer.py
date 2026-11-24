@@ -30,6 +30,11 @@ from pathlib import Path
 
 from .dataset import Dataset
 
+NO_TORCH = (
+    "this backend cannot train (torch is not installed); the browser trains on WebGPU. "
+    "For backend training: uv sync --extra serve"
+)
+
 
 def _f(v) -> float | None:
     """Coerce numpy/torch scalars to a JSON-serializable Python float (or None)."""
@@ -134,7 +139,14 @@ class Trainer(threading.Thread):
 
     # --- thread body ---
     def run(self) -> None:
-        from tensor_factory_train.train import ImageCache, fit, resolve_device  # heavy (torch)
+        try:
+            from tensor_factory_train.train import ImageCache, fit, resolve_device  # heavy (torch)
+        except ImportError:
+            # No torch here. The server still serves the UI (which trains in the browser on
+            # WebGPU) and still puts models on devices; it just cannot train by itself.
+            self.device = "none"
+            self._status(NO_TORCH)
+            return
 
         self._cache = ImageCache()
         self.device = self._device_pref or resolve_device()

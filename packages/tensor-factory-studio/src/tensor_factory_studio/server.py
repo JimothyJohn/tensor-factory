@@ -14,6 +14,9 @@ Routes:
   ``GET  /devices``          -> serial ports a board could be on, and whether the P4 tools exist
   ``GET  /deploy``           -> state of the current / last deploy (polled by the UI)
   ``POST /deploy?port=``     -> quantize the served model and write it to the P4 on that port
+  ``POST /model``            -> body = int8 ONNX trained in the browser; becomes the served model
+  ``POST /calib?i=``         -> body = one labeled frame from the browser (i = 0..63), kept to
+                                calibrate the P4 quantizer and to try on the board
   ``GET  /classes``          -> the ordered class list
   ``POST /samples?id&present&box&cls``  -> body = raw PNG; add/replace a labeled frame
   ``POST /classes``          -> body = {"classes": [...]}; set the ordered class list
@@ -101,10 +104,21 @@ def _desktop_box(model_path: Path, jpeg: bytes, input_size: int) -> list[float] 
     return [b.x1, b.y1, b.x2, b.y2]
 
 
+CALIB_FRAMES = 64  # frames a browser-trained model may bring along
+
+
+def _browser_frames(trainer: Trainer) -> Path:
+    """Where frames sent with a browser-trained model are kept (``POST /calib``)."""
+    return trainer.models_dir / "browser-frames"
+
+
 def _calib_dir(dataset: Dataset, trainer: Trainer) -> Path | None:
-    """Training images to calibrate the P4 quantizer with: the browser's, else a source's."""
-    for root in (dataset.root, *trainer.sources):
-        images = Path(root) / "images"
+    """Training images to calibrate the P4 quantizer with: the backend's own dataset, else
+    a source's, else the frames a browser-trained model brought along."""
+    for images in (
+        *(Path(root) / "images" for root in (dataset.root, *trainer.sources)),
+        _browser_frames(trainer),
+    ):
         if images.is_dir() and any(images.iterdir()):
             return images
     return None
@@ -123,7 +137,8 @@ def _probe_frame(dataset: Dataset, trainer: Trainer) -> bytes | None:
             for path in sorted(images.iterdir()):
                 if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
                     return path.read_bytes()
-    return None
+    first = _browser_frames(trainer) / "frame_00.png"
+    return first.read_bytes() if first.is_file() else None
 
 
 def make_deployer(dataset: Dataset, trainer: Trainer, input_size: int) -> Deployer:
@@ -135,6 +150,38 @@ def make_deployer(dataset: Dataset, trainer: Trainer, input_size: int) -> Deploy
         probe=lambda: _probe_frame(dataset, trainer),
         desktop_box=lambda onnx, jpeg: _desktop_box(onnx, jpeg, input_size),
     )
+
+
+def adopt_model(trainer: Trainer, data: bytes, input_size: int) -> Path:
+    """Make ``data`` (an int8 detector ONNX) the served model; ``ValueError`` if it is not one.
+
+    Written beside the trainer's own checkpoints and swapped in with ``os.replace``, so a
+    half-written file is never served.
+    """
+    import os
+
+    from tensor_factory.inference import Detector
+    from tensor_factory.zerort import parse_model
+
+    try:
+        graph = parse_model(data).graph
+        if "image" not in graph.input_names or "box" not in graph.output_names:
+            raise ValueError("no image input or box output")
+        det = Detector("browser.onnx", input_size=input_size, model_bytes=data)
+        from PIL import Image
+
+        # one real inference: a model exported for another input size fails here, not later
+        det.detect_box(Image.new("RGB", (input_size, input_size)))
+    except Exception as exc:  # noqa: BLE001 -- any parse/load failure is the caller's bad file
+        raise ValueError(f"not a detector model: {type(exc).__name__}") from exc
+    trainer.models_dir.mkdir(parents=True, exist_ok=True)
+    tmp = trainer.models_dir / "browser.onnx.part"
+    final = trainer.models_dir / "browser.onnx"
+    tmp.write_bytes(data)
+    os.replace(tmp, final)
+    _detector.cache_clear()  # /predict caches by path; the file behind it just changed
+    trainer.served = final
+    return final
 
 
 _DOWNLOADS = {"onnx": "tinydetector.onnx", "p4": "tinydetector.p4.bin", "pyz": "edge.pyz"}
@@ -229,6 +276,8 @@ def _make_handler(
                         "counts": dataset.counts(),
                         "classes": list(dataset.classes),
                         "config": trainer.config(),
+                        # the browser trains by itself unless there is data only we can read
+                        "sources": len(trainer.sources),
                     },
                 )
             elif route == "/devices":
@@ -276,6 +325,52 @@ def _make_handler(
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def _post_model(self) -> None:
+            # A model trained in the browser (WebGPU), handed over so this machine can put
+            # it on a device. It is loaded before it replaces anything: bytes that are not
+            # a detector for this input size are refused and the served model stays.
+            body = self._read_body()
+            if body is None:
+                return
+            try:
+                adopt_model(trainer, body, input_size)
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            self._json(200, {"ok": True, "bytes": len(body)})
+
+        def _post_calib(self) -> None:
+            # Frames never leave the browser when it trains; these few do, on request, so
+            # the P4 quantizer sees real images instead of noise and the board has one
+            # frame to be checked on. Re-encoded here: what is stored is an image we wrote.
+            try:
+                i = int(parse_qs(urlsplit(self.path).query).get("i", [""])[0])
+            except ValueError:
+                i = -1
+            if not 0 <= i < CALIB_FRAMES:
+                self._json(400, {"error": f"i must be 0..{CALIB_FRAMES - 1}"})
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            import io
+
+            from PIL import Image
+
+            frames = _browser_frames(trainer)
+            try:
+                with Image.open(io.BytesIO(body)) as im:
+                    rgb = im.convert("RGB")
+            except Exception as exc:  # noqa: BLE001 -- not an image -> 400
+                self._json(400, {"error": f"not an image: {type(exc).__name__}"})
+                return
+            frames.mkdir(parents=True, exist_ok=True)
+            if i == 0:  # a new set: drop the previous model's frames
+                for old in frames.glob("frame_*.png"):
+                    old.unlink(missing_ok=True)
+            rgb.save(frames / f"frame_{i:02d}.png")
+            self._json(200, {"ok": True})
+
         def _post_deploy(self) -> None:
             port = parse_qs(urlsplit(self.path).query).get("port", [""])[0]
             # Only a port this machine actually lists: the value reaches a subprocess argv.
@@ -308,6 +403,10 @@ def _make_handler(
                 self._post_classes()
             elif route == "/deploy":
                 self._post_deploy()
+            elif route == "/model":
+                self._post_model()
+            elif route == "/calib":
+                self._post_calib()
             elif route == "/reset":
                 dataset.clear()
                 trainer.reset()

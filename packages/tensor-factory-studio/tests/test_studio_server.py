@@ -310,3 +310,21 @@ def test_serve_rejects_a_source_that_is_not_a_dataset(tmp_path, capsys):
     rc = serve("127.0.0.1", 0, data_dir=tmp_path / "data", ui_dir=ui, sources=[missing])
     assert rc == 2
     assert str(missing) in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_the_hosted_copy_of_the_studio_is_current():
+    # docs/studio/ is what the public site serves; it must be the page in studio/.
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, str(repo / "scripts" / "sync_studio_site.py"), "--check"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout

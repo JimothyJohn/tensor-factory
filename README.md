@@ -30,8 +30,13 @@ median localization on mock data (real photoreal data is the harder, open case).
 deployed detector. The premise: **you orchestrate, the machine does the labor.**
 
 ```sh
-uv sync --extra serve && uv run tensor-factory-studio   # http://127.0.0.1:8089
+uv run tensor-factory-studio   # http://127.0.0.1:8089
 ```
+
+It trains **in your browser, on your GPU** (WebGPU, a current Chrome or Edge): no torch to
+install, and your frames never leave the machine. The command above serves the page and
+adds a local helper that writes the trained model to a board; the page is also hosted on
+the project site under `studio/`.
 
 - **Drop in a video and the busywork is already gone.** Frames are sampled at your fps
   and a perceptual-hash gate drops anything too similar to a frame you've already
@@ -45,9 +50,9 @@ uv sync --extra serve && uv run tensor-factory-studio   # http://127.0.0.1:8089
   unconfirmed, and a guardrail watches validation error every round — when quality
   regresses it points at the likely-bad samples, clickable, so you fix or drop them and
   move on.
-- **What you walk away with is the real thing.** Export is the canonical int8 ONNX from
-  the same trainer that builds the repo's bundled models — the model you nudged is the
-  model you ship.
+- **What you walk away with is the real thing.** Export is the canonical int8 ONNX: the
+  browser writes the same file, weight for weight, as the Python trainer that builds the
+  repo's bundled models — the model you nudged is the model you ship.
 
 The loop is reactive end to end: label → retrain → better pre-fills → less labeling.
 Your attention goes only where the model is still uncertain; everything else is one
