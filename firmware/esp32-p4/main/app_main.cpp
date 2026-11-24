@@ -2,7 +2,9 @@
 //
 // 1. Sweep: every model in models.inc, activations in PSRAM and then internal RAM first.
 //    One "BENCH {json}" line each.
-// 2. Soak: the model in detect.inc on the frames in frames.inc, forever. Each frame goes
+// 2. Image files: every JPEG in jpegs.inc is decoded, resized and detected on the board.
+//    One "DET {json}" line each, scored on the host by tools/score.py.
+// 3. Soak: the model in detect.inc on the frames in frames.inc, forever. Each frame goes
 //    through the whole path (uint8 RGB -> int8 input -> network -> soft-argmax box) and is
 //    checked two ways: against what the desktop int8 graph produced for that frame, and
 //    bit-for-bit against this board's own first answer. One "SOAK {json}" line per round.
@@ -11,6 +13,8 @@
 #include <cstring>
 #include <vector>
 
+#include "dl_image_jpeg.hpp"
+#include "dl_image_preprocessor.hpp"
 #include "dl_model_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_rom_crc.h"
@@ -48,6 +52,25 @@ static const Frame FRAMES[] = {
 #include "frames.inc"
     {nullptr, nullptr, {0, 0, 0, 0}, 0}};
 #undef FRAME
+struct Jpeg {
+    const char *sym;
+    const char *name;
+    const uint8_t *start;
+    const uint8_t *end;
+    float truth[4];
+    float desktop[4];
+};
+#define JPG(sym, name, t1, t2, t3, t4, d1, d2, d3, d4)                                             \
+    extern const uint8_t _binary_##sym##_jpg_start[];                                              \
+    extern const uint8_t _binary_##sym##_jpg_end[];
+#include "jpegs.inc"
+#undef JPG
+#define JPG(sym, name, t1, t2, t3, t4, d1, d2, d3, d4)                                             \
+    {#sym, name, _binary_##sym##_jpg_start, _binary_##sym##_jpg_end, {t1, t2, t3, t4}, {d1, d2, d3, d4}},
+static const Jpeg JPEGS[] = {
+#include "jpegs.inc"
+    {nullptr, nullptr, nullptr, nullptr, {0, 0, 0, 0}, {0, 0, 0, 0}}};
+#undef JPG
 #ifndef DETECT_SIZE
 #define DETECT_SIZE 0
 #define DETECT_GAIN 1.0f
@@ -225,6 +248,90 @@ static void soak(const Entry &e)
     }
 }
 
+// Width and height from a baseline JPEG's frame header; false for progressive or broken files.
+static bool jpeg_size(const uint8_t *d, size_t n, int *w, int *h)
+{
+    size_t i = 2;
+    while (i + 9 < n) {
+        if (d[i] != 0xFF) {
+            i++;
+            continue;
+        }
+        uint8_t m = d[i + 1];
+        if (m == 0xC0 || m == 0xC1) {
+            *h = (d[i + 5] << 8) | d[i + 6];
+            *w = (d[i + 7] << 8) | d[i + 8];
+            return *w > 0 && *h > 0;
+        }
+        if (m == 0xC2 || m == 0xDA) {
+            return false;
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7) || m == 0xFF) {
+            i += (m == 0xFF) ? 1 : 2;
+            continue;
+        }
+        i += 2 + ((d[i + 2] << 8) | d[i + 3]);
+    }
+    return false;
+}
+
+// Image files as bytes: JPEG decode -> resize + quantize into the model input -> network ->
+// box. One "DET {json}" line per file, with the label and the desktop box next to ours.
+static void run_jpegs(const Entry &e)
+{
+    dl::Model *model =
+        new dl::Model((const char *)e.data, fbs::MODEL_LOCATION_IN_FLASH_RODATA, INTERNAL_FIRST);
+    dl::TensorBase *heat = nullptr;
+    for (auto &kv : model->get_outputs()) {
+        if (kv.second->get_size() != 1) heat = kv.second;
+    }
+    // pixel / 255, stretched to the model's square input (how the detector is trained).
+    dl::image::ImagePreprocessor pre(model, {0, 0, 0}, {255, 255, 255});
+    printf("JPEG_START {\"model\":\"%s\",\"size\":%d}\n", e.name, DETECT_SIZE);
+    // Two passes: the software decoder, then the chip's hardware JPEG decoder.
+    for (int hw = 0; hw < 2; hw++) {
+        for (const Jpeg *j = JPEGS; j->name; j++) {
+            dl::image::jpeg_img_t file = {.data = (void *)j->start, .data_len = (size_t)(j->end - j->start)};
+            int w = 0, h = 0;
+            bool baseline = jpeg_size(j->start, file.data_len, &w, &h);
+            int64_t t0 = esp_timer_get_time();
+            dl::image::img_t img = {};
+            if (baseline) { // neither decoder takes progressive files
+                img = hw ? dl::image::hw_decode_jpeg(file, dl::image::DL_IMAGE_PIX_TYPE_RGB888, 500)
+                         : dl::image::sw_decode_jpeg(file, dl::image::DL_IMAGE_PIX_TYPE_RGB888);
+            }
+            int64_t t1 = esp_timer_get_time();
+            if (!img.data) {
+                printf("DET {\"name\":\"%s\",\"decoder\":\"%s\",\"ok\":false,\"baseline\":%s,"
+                       "\"bytes\":%u}\n",
+                       j->name, hw ? "hw" : "sw", baseline ? "true" : "false", (unsigned)file.data_len);
+                continue;
+            }
+            // The hardware decoder pads to whole 16-pixel blocks: crop back to the picture.
+            pre.preprocess(img, {0, 0, w, h});
+            int64_t t2 = esp_timer_get_time();
+            model->run(dl::RUNTIME_MODE_MULTI_CORE);
+            int64_t t3 = esp_timer_get_time();
+            float box[4];
+            decode_box(heat, DETECT_GAIN, box);
+            int64_t t4 = esp_timer_get_time();
+            printf("DET {\"name\":\"%s\",\"decoder\":\"%s\",\"ok\":true,\"bytes\":%u,\"w\":%d,"
+                   "\"h\":%d,\"decode_ms\":%.2f,\"resize_ms\":%.2f,\"net_ms\":%.2f,\"post_ms\":%.2f,"
+                   "\"box\":[%.4f,%.4f,%.4f,%.4f],\"truth\":[%.4f,%.4f,%.4f,%.4f],"
+                   "\"desktop\":[%.4f,%.4f,%.4f,%.4f]}\n",
+                   j->name, hw ? "hw" : "sw", (unsigned)file.data_len, w, h, (t1 - t0) / 1000.0f,
+                   (t2 - t1) / 1000.0f, (t3 - t2) / 1000.0f, (t4 - t3) / 1000.0f, box[0], box[1],
+                   box[2], box[3], j->truth[0], j->truth[1], j->truth[2], j->truth[3], j->desktop[0],
+                   j->desktop[1], j->desktop[2], j->desktop[3]);
+            heap_caps_free(img.data);
+        }
+    }
+    printf("JPEG_DONE {\"internal_min_free\":%u,\"psram_min_free\":%u}\n",
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+    delete model;
+}
+
 extern "C" void app_main(void)
 {
     printf("BENCH_START internal_free=%u psram_free=%u\n",
@@ -235,6 +342,9 @@ extern "C" void app_main(void)
         sweep_one(*e, INTERNAL_FIRST); // internal RAM first, spill to PSRAM
     }
     printf("BENCH_DONE\n");
+    if (DETECT[0].name && JPEGS[0].name) {
+        run_jpegs(DETECT[0]);
+    }
     if (DETECT[0].name) {
         soak(DETECT[0]);
     }

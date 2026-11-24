@@ -190,6 +190,44 @@ def write_frames(run, gain: float, args, positives, negatives) -> None:  # noqa:
     (out / "frames.inc").write_text("\n".join(lines) + "\n")
 
 
+def write_jpegs(run, gain: float, args, positives) -> None:  # noqa: ANN001
+    """Original JPEG files, untouched, plus the label and the desktop int8 box for each.
+
+    The board decodes and resizes these itself, so its answer can differ from the desktop's
+    (different decoder, nearest-neighbour instead of bilinear resize); the firmware prints
+    all three boxes and ``tools/score.py`` compares them.
+    """
+    out = Path(args.jpegs_out)
+    out.mkdir(parents=True, exist_ok=True)
+    lines = [f"#define DETECT_SIZE {args.size}", f"#define DETECT_GAIN {gain!r}f"]
+    used = 0
+    for path, box in positives[args.jpegs_skip :]:
+        data = path.read_bytes()
+        if args.jpegs_resave:
+            import io
+
+            from PIL import Image
+
+            w, h = (int(v) for v in args.jpegs_resave.lower().split("x"))
+            buf = io.BytesIO()
+            Image.open(path).convert("RGB").resize((w, h)).save(
+                buf, "JPEG", quality=90, subsampling="4:2:0"
+            )
+            data = buf.getvalue()
+        if len(lines) - 2 >= args.jpegs or used + len(data) > args.jpegs_budget:
+            break
+        if path.suffix.lower() not in (".jpg", ".jpeg"):
+            continue
+        i = len(lines) - 2
+        used += len(data)
+        (out / f"img_{i}.jpg").write_bytes(data)
+        desk, _ = _decode(*run(load_image(out / f"img_{i}.jpg", args.size)[None]), gain)
+        vals = ", ".join(f"{v:.6f}f" for v in [box.x1, box.y1, box.x2, box.y2, *desk])
+        lines.append(f'JPG(img_{i}, "{path.stem}", {vals})')
+    (out / "jpegs.inc").write_text("\n".join(lines) + "\n")
+    print(f"embedded {len(lines) - 2} JPEG files, {used} B")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--size", type=int, default=160, help="square input size (px)")
@@ -201,6 +239,16 @@ def main() -> None:
     ap.add_argument("--negatives", default=None, help="no-object images for --eval")
     ap.add_argument("--frames", type=int, default=0, help="embed this many --eval frames")
     ap.add_argument("--frames-out", default=None, help="directory for frame_N.rgb + frames.inc")
+    ap.add_argument("--jpegs", type=int, default=0, help="embed up to this many --eval JPEG files")
+    ap.add_argument("--jpegs-skip", type=int, default=0, help="start at this --eval item")
+    ap.add_argument("--jpegs-budget", type=int, default=12_000_000, help="total bytes of JPEG")
+    ap.add_argument(
+        "--jpegs-resave",
+        default=None,
+        metavar="WxH",
+        help="re-encode each file at this size first, e.g. 480x320 (the hardware decoder needs /8)",
+    )
+    ap.add_argument("--jpegs-out", default=None, help="directory for img_N.jpg + jpegs.inc")
     ap.add_argument("--out", required=True, help="output .espdl path")
     args = ap.parse_args()
 
@@ -241,6 +289,8 @@ def main() -> None:
         with torch.no_grad():
             report["float"] = evaluate(model, model.gain, args.size, positives, negatives)
             report["int8"] = evaluate(executor.forward, model.gain, args.size, positives, negatives)
+        if args.jpegs and args.jpegs_out:
+            write_jpegs(executor.forward, model.gain, args, positives)
         if args.frames and args.frames_out:
             write_frames(executor.forward, model.gain, args, positives, negatives)
     Path(args.out).with_suffix(".report.json").write_text(json.dumps(report, indent=2) + "\n")
