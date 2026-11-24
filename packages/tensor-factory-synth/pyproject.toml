@@ -19,7 +19,7 @@ gemini = [
 # Auto-labeler (GroundingDINO) only. Heavy, GPU-shaped; NOT installed by default
 # `uv sync`. Pull with `uv sync --extra gpu` on a CUDA box or this Mac Studio's MPS.
 gpu = [
-    "torch>=2.2",
+    "torch>=2.13.0",
     "transformers>=4.44",
     "accelerate>=0.30",
 ]
