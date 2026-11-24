@@ -102,9 +102,45 @@ On the 20% held out during retraining (about 26 frames with a helicoil, one seed
 error in 480-px units was 41.7 / 31.5 / 43.5 / 45.0 px at 480 / 320 / 224 / 160 px and
 presence 98 / 98 / 93 / 95%. That is too few frames to rank the sizes.
 
+**Image files as bytes** (2026-11-24). All 432 held-out Oxford-IIIT Pet test photos,
+original JPEG files embedded untouched (mean 100 KB, 0.17 megapixel), 224 px model. The
+board decodes, resizes and detects each one itself:
+
+| Stage | Mean time |
+|---|---|
+| JPEG decode (software) | 56.3 ms (about 330 ms per megapixel) |
+| Resize + quantize into the model input | 2.4 ms |
+| Network | 11.4 ms |
+| Box decode | 0.5 ms |
+| **File to box** | **70.6 ms mean, 75 ms median, 96 ms at the 95th percentile, 375 ms worst** (a 1600x1200 photo) |
+
+- 430 of 432 files decoded. The two that did not are progressive JPEGs, which ESP-DL's
+  software decoder does not take.
+- The chip's hardware JPEG decoder took only 26 of 432: it refuses any picture whose width
+  or height is not a multiple of 8. On files it accepts it is about 9x faster. Twenty of the
+  same photos re-encoded at 480x320: 3.8 ms hardware against 33.6 ms software, 18 ms file
+  to box (`results/jpeg-decoders-480x320-20261124.txt`).
+- Accuracy on this dataset is **not a result**: the tiny detector does not learn pet heads.
+  Two trainings (width 16 for 40 epochs, width 32 for 100) both ended no better than always
+  predicting the average box on held-out images (26.7 and 27.1 px against 24.8 px at 224 px),
+  on the desktop in float, before the board is involved. What the run does show is that the
+  board tracks the desktop: mean IoU against the labels 0.283 on the board and 0.289 on the
+  desktop over the same 430 files.
+- Per file the board's box and the desktop's overlap by 0.67 IoU on average, not 1.0 as
+  with raw frames. The decoders differ and ESP-DL resizes by nearest neighbour where
+  training uses bilinear. With a model this unsure of itself that is an upper bound on the
+  preprocessing effect, not a measurement of it.
+
+For scale, Espressif's stock YOLO11n COCO detector (640 px, multi-object) on the same board:
+62 ms to decode its 405x540 test JPEG, 1,462 ms per detection pass, same four boxes as
+Espressif's reference output.
+
+Reproduce: `tools/pets_dataset.py` builds the dataset, `tools/run_pets.sh` runs it through
+the board in batches, `tools/score.py` scores the output.
+
 **Operators.** All 15 converted and quantized; none failed, none substituted. The one
 design change is deliberate: the soft-argmax (Softmax, Range, Reshape, ReduceSum) is not in
 the on-device graph; it is done in firmware.
 
-**Not done.** No camera, ISP or PPA yet: frames are embedded in the firmware image. No
+**Not done.** Images are embedded in the firmware image, not sent to the board at run time. No
 quantization-aware training. Only one of the two boards was flashed.

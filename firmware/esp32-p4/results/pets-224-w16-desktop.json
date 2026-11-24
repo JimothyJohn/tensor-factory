@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "size": 224,
+    "gain": 1.290364240830652,
+    "source": "pets-224.onnx (width 16, 40 epochs, Oxford-IIIT Pet train split)"
+  },
+  "float": {
+    "center_err_px_mean": 75.43,
+    "center_err_px_median": 69.76,
+    "presence_acc": 1.0,
+    "images": 432
+  },
+  "int8": {
+    "center_err_px_mean": 75.55,
+    "center_err_px_median": 69.96,
+    "presence_acc": 1.0,
+    "images": 432
+  }
+}

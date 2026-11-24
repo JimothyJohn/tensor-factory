@@ -28,22 +28,29 @@ _STEM = re.compile(r"[A-Za-z0-9_]+")
 _TAGS = ("width", "height", "xmin", "ymin", "xmax", "ymax")
 
 
-def head_boxes(tar_path: str) -> dict[str, tuple[int, int, int, int, int, int]]:
-    """file stem -> (width, height, xmin, ymin, xmax, ymax) from annotations/xmls/*.xml."""
-    boxes = {}
+def head_boxes(tar_path: str) -> dict[str, list[int]]:
+    """file stem -> [width, height, xmin, ymin, xmax, ymax] from annotations/xmls/*.xml."""
+    boxes: dict[str, list[int]] = {}
     with tarfile.open(tar_path) as tar:
         for member in tar:
             name = Path(member.name)
             if not member.isfile() or name.suffix != ".xml" or name.parent.name != "xmls":
                 continue
-            text = tar.extractfile(member).read().decode("utf-8", "replace")  # ty: ignore[possibly-missing-attribute]
+            handle = tar.extractfile(member)
+            if handle is None or not _STEM.fullmatch(name.stem):
+                continue
+            text = handle.read().decode("utf-8", "replace")
             # The files are tiny, flat VOC records; a regex per tag avoids an XML parser on
             # downloaded data. Records with more than one object are skipped.
             if text.count("<object>") != 1:
                 continue
-            vals = [re.search(rf"<{t}>\s*(\d+)\s*</{t}>", text) for t in _TAGS]
-            if all(vals) and _STEM.fullmatch(name.stem):
-                boxes[name.stem] = tuple(int(v.group(1)) for v in vals)  # ty: ignore[possibly-missing-attribute]
+            vals = []
+            for tag in _TAGS:
+                found = re.search(rf"<{tag}>\s*(\d+)\s*</{tag}>", text)
+                if found:
+                    vals.append(int(found.group(1)))
+            if len(vals) == len(_TAGS):
+                boxes[name.stem] = vals
     return boxes
 
 
