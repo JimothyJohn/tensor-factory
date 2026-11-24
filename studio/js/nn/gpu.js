@@ -350,6 +350,28 @@ export class GpuTrainer {
     return buffer;
   }
 
+  /** Replace every parameter and start the optimizer over (a new training round). */
+  load(params) {
+    const q = this.device.queue;
+    for (const [name, shape] of Object.entries(this.shapes)) {
+      if (name.includes("running_")) continue;
+      const t = params[name];
+      if (!t || t.data.length !== shape.reduce((x, y) => x * y, 1)) {
+        throw new Error(`load: ${name} is missing or has another shape`);
+      }
+      q.writeBuffer(this.buf[name], 0, Float32Array.from(t.data));
+      const zeros = new Float32Array(t.data.length);
+      for (const kind of ["grad", "m", "v"]) q.writeBuffer(this.buf[`${kind}:${name}`], 0, zeros);
+    }
+    this.blocks.forEach((b, i) => {
+      const both = new Float32Array(2 * b.cout);
+      both.set(params[`features.${i}.1.running_mean`].data, 0);
+      both.set(params[`features.${i}.1.running_var`].data, b.cout);
+      q.writeBuffer(this.buf[`running:${i}`], 0, both);
+    });
+    this.step = 0;
+  }
+
   /** One kernel call: a uniform, a bind group and how many invocations to dispatch. */
   _op(kernelName, buffers, total, { a = [0, 0, 0, 0], b = [0, 0, 0, 0], pad = 0, k = 0, f = [0, 0, 0, 0] } = {}) {
     const uniform = this.device.createBuffer({
@@ -641,5 +663,78 @@ export class GpuTrainer {
       out[name] = await this.read(this.buf[`grad:${name}`], shape.reduce((x, y) => x * y, 1));
     }
     return out;
+  }
+}
+
+const LOSS_LOG = 1 << 16; // per-sample losses kept on the GPU between reads
+
+/**
+ * The trainer as the training loop (local.js) drives it: load weights, step, read the
+ * epoch's loss, predict. `RefEngine` in ref-engine.js has the same methods on the CPU.
+ */
+export class GpuEngine {
+  constructor(device, { size }) {
+    this.device = device;
+    this.size = size;
+    this.trainer = null;
+    this.batches = [];
+    this.cursor = 0;
+  }
+
+  load(params) {
+    if (this.trainer) this.trainer.load(params);
+    else {
+      this.trainer = new GpuTrainer(this.device, params, { size: this.size });
+      this.lossLog = this.trainer.lossBuffer(LOSS_LOG);
+    }
+    this.batches = [];
+    this.cursor = 0;
+    this.carried = 0;
+    this.carriedSamples = 0;
+  }
+
+  async trainStep(x, boxes, hasBox) {
+    const n = hasBox.length;
+    if (this.cursor + n > LOSS_LOG) await this._drain();
+    this.trainer.trainStep(x, boxes, hasBox, { lossInto: this.lossLog, lossOffset: this.cursor });
+    this.batches.push(n);
+    this.cursor += n;
+    await this.device.queue.onSubmittedWorkDone(); // one step at a time keeps the page responsive
+  }
+
+  async _drain() {
+    if (!this.cursor) return;
+    const values = await this.trainer.read(this.lossLog, this.cursor);
+    let pos = 0;
+    for (const n of this.batches) {
+      let batchLoss = 0;
+      for (let i = 0; i < n; i++) batchLoss += values[pos + i];
+      this.carried += batchLoss * n;
+      this.carriedSamples += n;
+      pos += n;
+    }
+    this.batches = [];
+    this.cursor = 0;
+  }
+
+  /** Mean loss over the samples stepped since the last call (each batch weighted by its size). */
+  async epochLoss() {
+    await this._drain();
+    const mean = this.carriedSamples ? this.carried / this.carriedSamples : null;
+    this.carried = 0;
+    this.carriedSamples = 0;
+    return mean;
+  }
+
+  predict(x, n) {
+    return this.trainer.predict(x, n);
+  }
+
+  params() {
+    return this.trainer.params();
+  }
+
+  async gain() {
+    return Math.exp((await this.trainer.read(this.trainer.buf["log_gain"], 1))[0]);
   }
 }
