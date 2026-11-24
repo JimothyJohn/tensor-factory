@@ -14,6 +14,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
   the main checkout has 9 commits that were never pushed (the WATTAGE.md / margin.html
   economics study) and has diverged from `origin/master` by 8, so a plain push will be
   rejected until those are reconciled.
+  **2026-11-23:** draft PR #72 (`dev` → `master`) is open and conflict-free: `master` was
+  merged into `dev` in #70, so it is a fast-forward. Merge it with a merge commit, not a
+  squash. The 9 local commits are not part of it. `master` is already the GitHub default
+  branch, so CodeQL and the current automerge workflow stay off until this lands.
       options: merge dev into master now — the site and release line catch up; you reconcile the 9 local commits first | wait — master stays on the June/July state
       recommend: merge dev into master now — four months of work is invisible to anyone reading the site
       stakes: high
@@ -21,8 +25,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: promote-dev-to-master
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: merge dev into master now
+      answered: 2026-11-15
 
-- [ ] **What should "cloud" be for this project?** The pipeline now runs data → training →
+- [x] **What should "cloud" be for this project?** The pipeline now runs data → training →
   one-file edge bundle, all on this Mac. Nothing is in AWS yet. The three candidates do
   different jobs and cost different amounts, so this is a direction call.
       options: S3 store for datasets and models — datasets stop living on one disk; the edge pulls a model by its sha256; a few cents a month | GPU training runs on EC2 — a script launches a g5/g6 spot instance, trains, uploads the model, shuts down; about $0.30–1.00 per run | hosted inference endpoint — a Lambda that serves /detect; pay per request, needs a public-access decision | nothing yet — stay local
@@ -32,10 +38,14 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: cloud-direction
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: S3 store for datasets and models
+      answered: 2026-11-15
 
 - [ ] **Which board is the edge target, and may I deploy to it?** The one-file bundle
   (`edge.pyz`) is proven on aarch64 Linux in CI but has never run on a physical board.
   Deploying means copying one file and starting a user-level systemd service on that host.
+  **2026-11-23:** the answer picked "name a host" but no hostname came with it, and
+  `~/.ssh/config` lists no Pi-class board. Put the hostname or address on the `answer:` line.
       options: name a host — I copy the bundle, start the service, and report frames per second and the model sha256 from the device | none yet — the CI proof stands until a board is chosen
       recommend: name a host — real throughput on the real board is the number the whole "tiny CNN on CPU" claim rests on
       stakes: low
@@ -44,8 +54,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: edge-target-host
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: name a host
+      answered: 2026-11-15
 
-- [ ] **Which landing page wins: the restyled page or the single-file detection app?**
+- [x] **Which landing page wins: the restyled page or the single-file detection app?**
   `docs/index.html` on `dev` is the restyled landing page. The local branch `feat/index-app`
   (worktree `../tensor-factory-index-app`, never pushed) replaces the same file with a
   self-contained in-browser detection app (2.4 MB, live camera, YOLOX-Nano). They cannot
@@ -57,8 +69,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: landing-page-choice
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: restyled page stays, app moves to docs/app.html
+      answered: 2026-11-17
 
-- [ ] **Dismiss the two remaining code-scanning alerts as false positives?** Five of the
+- [x] **Dismiss the two remaining code-scanning alerts as false positives?** Five of the
   seven alerts raised when the new code was first scanned are fixed. Two remain where no code
   change is right. Alert 11 (`studio/js/video.js`) flags `video.src = URL.createObjectURL(file)`
   as cross-site scripting; the value is a `blob:` address the browser creates from a file,
@@ -71,8 +85,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: codeql-false-positives
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: dismiss both
+      answered: 2026-11-15
 
-- [ ] **Protect master and turn on private vulnerability reporting?** Both were on the
+- [x] **Protect master and turn on private vulnerability reporting?** Both were on the
   original launch list and neither is set (checked 2026-11-15): `master` has no branch
   protection, and private vulnerability reporting is off although `SECURITY.md` tells
   reporters to use it. These are repository settings on your release branch, so I left them.
@@ -82,8 +98,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: master-protection-and-pvr
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: enable both
+      answered: 2026-11-15
 
-- [ ] **Keep `dev` as the GitHub default branch?** GitHub's default branch is `dev`, while
+- [x] **Keep `dev` as the GitHub default branch?** GitHub's default branch is `dev`, while
   `CLAUDE.md` says the default is `master`. Dependabot and CodeQL read their configuration
   from the default branch, so today they work because the config lives on `dev`.
       options: keep dev as default, fix the docs — nothing changes in behavior | make master the default — Dependabot and CodeQL config must be promoted to master first or they go quiet
@@ -92,8 +110,10 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: default-branch
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: make master the default
+      answered: 2026-11-15
 
-- [ ] **Keep or drop `wip/recovered-docs-site-20260623`?** A snapshot branch another session
+- [x] **Keep or drop `wip/recovered-docs-site-20260623`?** A snapshot branch another session
   made on 2026-06-23 of an orphaned docs-site edit; 4 commits that are not on `dev`. The docs
   site has since been consolidated and restyled twice.
       options: drop — delete the branch | keep — I open a PR so you can read the 4 commits against the current site
@@ -102,6 +122,8 @@ separately in [`ROADMAP.md`](ROADMAP.md).
       id: recovered-docs-site
       asked: 2026-11-15
       by: fable-2026-11-15
+      answer: drop
+      answered: 2026-11-15
 
 - [ ] **Keep or drop `wip/recovered-margin-economics-20260702`?** A second snapshot of the
   WATTAGE.md / margin.html economics study. The same work is in your unpushed local `master`
