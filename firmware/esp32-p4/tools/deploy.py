@@ -172,8 +172,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
         check=False,
     )
     if proc.returncode != 0:
-        tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
-        return _finish({"ok": False, "error": "esptool failed: " + " | ".join(tail)})
+        lines = [ln.strip() for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
+        fatal = [ln for ln in lines if "fatal error" in ln.lower()]
+        why = fatal[-1].split("occurred:", 1)[-1].strip() if fatal else " | ".join(lines[-3:])
+        return _finish({"ok": False, "error": f"could not write to the board: {why}"})
     board = Board(args.port)
     board.reset()
     reply = board.wait("MODEL ", 60.0)
